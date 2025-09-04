@@ -4,17 +4,15 @@
     "slug": "rivals-app",
     "version": "1.0.0",
     "orientation": "portrait",
-
     "icon": "./assets/icon.png",
-
     "splash": {
       "image": "./assets/icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#0B0B0B"
     },
-
-    "assetBundlePatterns": ["**/*"],
-
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "bundleIdentifier": "com.rivalstcg.rivalsapp",
       "supportsTablet": false,
@@ -25,7 +23,6 @@
         "NSPhotoLibraryAddUsageDescription": "Rivals can save photos to your library when you export or download images."
       }
     },
-
     "android": {
       "package": "com.rivalstcg.rivalsapp",
       "versionCode": 1,
@@ -34,11 +31,13 @@
         "backgroundColor": "#0B0B0B"
       }
     },
-
     "extra": {
       "collectr": {
         "proxyUrl": "https://rivals-collectr-proxy.rivalstcg.workers.dev",
         "sellerId": "b17b41c6-0a17-402f-a877-224ad79025f2"
+      },
+      "eas": {
+        "projectId": "5bdec808-27b5-4b67-a649-39b997cc18ec"
       }
     }
   }
