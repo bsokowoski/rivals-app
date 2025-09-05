@@ -20,7 +20,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Rivals needs camera access to scan cards and take photos for listings.",
         "NSPhotoLibraryUsageDescription": "Rivals needs photo library access so you can choose photos for listings and your profile.",
-        "NSPhotoLibraryAddUsageDescription": "Rivals can save photos to your library when you export or download images."
+        "NSPhotoLibraryAddUsageDescription": "Rivals can save photos to your library when you export or download images.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -33,12 +34,15 @@
     },
     "extra": {
       "collectr": {
-        "proxyUrl": "https://rivals-collectr-proxy.rivalstcg.workers.dev",
+        "proxyUrl": "https://rivals-collectr-proxy.rivals-app.workers.dev",
         "sellerId": "b17b41c6-0a17-402f-a877-224ad79025f2"
       },
       "eas": {
         "projectId": "5bdec808-27b5-4b67-a649-39b997cc18ec"
       }
-    }
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }

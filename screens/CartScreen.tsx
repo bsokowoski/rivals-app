@@ -1,242 +1,257 @@
-// screens/CartScreen.tsx
+// File: screens/CartScreen.tsx
 import React, { useMemo } from 'react';
 import {
   View,
   Text,
-  FlatList,
-  Image,
-  TouchableOpacity,
-  ActivityIndicator,
   StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Image,
   Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useCart } from '../contexts/CartContext';
 
-const currency = (n: number) =>
-  Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
+type RawCartItem = {
+  id?: string | number;
+  name?: string;
+  price?: number;        // dollars
+  priceCents?: number;   // cents
+  image?: string;
+  imageUrl?: string;
+  quantity?: number;
+  qty?: number;
+};
 
-const CartScreen: React.FC = () => {
+type CartItem = {
+  id: string;
+  name: string;
+  priceCents: number;
+  imageUrl?: string;
+  qty: number;
+};
+
+const toCents = (v: unknown) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n * 100) : 0;
+};
+
+const normalize = (it: RawCartItem): CartItem => ({
+  id: String(it.id ?? ''),
+  name: it.name ?? 'Item',
+  priceCents:
+    typeof it.priceCents === 'number'
+      ? Math.max(0, Math.round(it.priceCents))
+      : toCents(it.price),
+  imageUrl: it.imageUrl ?? it.image ?? undefined,
+  qty: Math.max(1, Number(it.qty ?? it.quantity ?? 1)),
+});
+
+const money = (cents: number) =>
+  `$${(Math.max(0, Math.round(cents)) / 100).toFixed(2)}`;
+
+export default function CartScreen() {
   const navigation = useNavigation<any>();
-  const { cart, total, updateQuantity, removeFromCart, clearCart, isHydrated } = useCart();
 
-  const itemCount = useMemo(
-    () => cart.reduce((sum, i) => sum + i.quantity, 0),
-    [cart]
-  );
+  // ✅ Safely consume cart context (no crash if provider not mounted)
+  let cart: {
+    items?: RawCartItem[];
+    removeItem?: (id: string) => void;
+    clearCart?: () => void;
+  } = {};
+  try {
+    cart = (useCart?.() as any) ?? {};
+  } catch {
+    cart = {};
+  }
 
-  const handleDecrease = (id: string, qty: number) => {
-    if (qty <= 1) {
-      // Confirm removal at qty 1 when decreasing
-      Alert.alert('Remove item?', 'Quantity is 1. Remove this item from cart?', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: () => removeFromCart(id) },
-      ]);
+  const data: CartItem[] = useMemo(() => {
+    const arr = Array.isArray(cart.items) ? cart.items : [];
+    return arr.map(normalize).filter((x) => x.id);
+  }, [cart.items]);
+
+  const { subtotalCents, itemCount } = useMemo(() => {
+    let subtotal = 0;
+    let count = 0;
+    for (const it of data) {
+      subtotal += it.priceCents * it.qty;
+      count += it.qty;
+    }
+    return { subtotalCents: subtotal, itemCount: count };
+  }, [data]);
+
+  const onRemove = (id: string) => {
+    if (typeof cart.removeItem === 'function') {
+      cart.removeItem(id);
     } else {
-      updateQuantity(id, qty - 1);
+      Alert.alert('Not available in this beta', 'Removing items will be enabled soon.');
     }
   };
 
-  const handleIncrease = (id: string, qty: number) => {
-    updateQuantity(id, qty + 1);
+  const onClear = () => {
+    if (typeof cart.clearCart === 'function') {
+      cart.clearCart();
+    } else {
+      Alert.alert('Not available in this beta', 'Clearing the cart is not enabled.');
+    }
   };
 
-  const handleRemove = (id: string) => {
-    removeFromCart(id);
+  const proceedToCheckout = () => {
+    try {
+      navigation.navigate('Checkout');
+    } catch {
+      Alert.alert('Navigation error', 'Checkout screen is not available in this build.');
+    }
   };
 
-  const confirmClear = () => {
-    if (cart.length === 0) return;
-    Alert.alert('Clear cart?', 'This will remove all items from your cart.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: clearCart },
-    ]);
-  };
-
-  const goToCheckout = () => {
-    if (cart.length === 0) return;
-    navigation.navigate('Checkout');
-  };
-
-  // Hydration/loading
-  if (!isHydrated) {
+  if (data.length === 0) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.muted}>Loading your cart…</Text>
-      </View>
-    );
-  }
-
-  // Empty state
-  if (cart.length === 0) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.title}>Your cart is empty</Text>
-        <Text style={styles.muted}>Add some items and they’ll show up here.</Text>
+      <View style={s.empty}>
+        <Text style={s.title}>Your Cart</Text>
+        <Text style={s.muted}>Your cart is empty.</Text>
         <TouchableOpacity
-          style={[styles.button, styles.primary]}
-          onPress={() => navigation.navigate('Home')}
+          style={[s.btn, s.primary]}
+          onPress={() => navigation.navigate('Tabs', { screen: 'Inventory' })}
+          activeOpacity={0.85}
         >
-          <Text style={styles.buttonText}>Browse Products</Text>
+          <Text style={s.btnText}>Browse Inventory</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>Cart ({itemCount})</Text>
-        <TouchableOpacity onPress={confirmClear}>
-          <Text style={styles.clearText}>Clear</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* List */}
+    <View style={s.container}>
       <FlatList
-        data={cart}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ paddingBottom: 120 }}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        data={data}
+        keyExtractor={(it) => it.id}
+        contentContainerStyle={{ padding: 16, paddingBottom: 160 }}
+        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
         renderItem={({ item }) => (
-          <View style={styles.itemRow}>
-            {item.image ? (
-              <Image source={{ uri: item.image }} style={styles.thumb} />
-            ) : (
-              <View style={[styles.thumb, styles.thumbPlaceholder]}>
-                <Text style={styles.thumbInitial}>{item.name?.[0]?.toUpperCase() ?? '?'}</Text>
-              </View>
-            )}
-
-            <View style={styles.itemInfo}>
-              <Text numberOfLines={1} style={styles.itemName}>{item.name}</Text>
-              <Text style={styles.itemPrice}>{currency(item.price)}</Text>
-
-              <View style={styles.qtyRow}>
-                <TouchableOpacity
-                  style={[styles.qtyBtn, styles.pill]}
-                  onPress={() => handleDecrease(item.id, item.quantity)}
-                >
-                  <Text style={styles.qtyBtnText}>−</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.qtyLabel}>{item.quantity}</Text>
-
-                <TouchableOpacity
-                  style={[styles.qtyBtn, styles.pill]}
-                  onPress={() => handleIncrease(item.id, item.quantity)}
-                >
-                  <Text style={styles.qtyBtnText}>＋</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.removeBtn} onPress={() => handleRemove(item.id)}>
-                  <Text style={styles.removeText}>Remove</Text>
-                </TouchableOpacity>
-              </View>
+          <View style={s.row}>
+            <Image
+              source={{
+                uri:
+                  item.imageUrl ||
+                  'https://ui-avatars.com/api/?name=Card&background=0f1012&color=fff',
+              }}
+              style={s.thumb}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={s.name} numberOfLines={2}>{item.name}</Text>
+              <Text style={s.meta}>
+                Qty {item.qty} · {money(item.priceCents)} each
+              </Text>
             </View>
-
-            <View style={styles.lineTotalWrap}>
-              <Text style={styles.lineTotal}>{currency(item.price * item.quantity)}</Text>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={s.lineTotal}>{money(item.priceCents * item.qty)}</Text>
+              <TouchableOpacity style={[s.smallBtn, s.ghost]} onPress={() => onRemove(item.id)}>
+                <Text style={s.smallBtnText}>Remove</Text>
+              </TouchableOpacity>
             </View>
           </View>
         )}
       />
 
-      {/* Footer / Summary */}
-      <View style={styles.footer}>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Subtotal</Text>
-          <Text style={styles.summaryValue}>{currency(total)}</Text>
+      {/* Sticky footer */}
+      <View style={s.footer}>
+        <View style={s.summaryRow}>
+          <Text style={s.summaryLabel}>Items</Text>
+          <Text style={s.summaryValue}>{itemCount}</Text>
         </View>
-        {/* If you introduce taxes/shipping, add rows here */}
+        <View style={s.summaryRow}>
+          <Text style={s.summaryLabel}>Subtotal</Text>
+          <Text style={s.summaryValue}>{money(subtotalCents)}</Text>
+        </View>
 
-        <TouchableOpacity
-          style={[styles.button, styles.primary, styles.checkoutBtn]}
-          onPress={goToCheckout}
-        >
-          <Text style={styles.buttonText}>Proceed to Checkout</Text>
-        </TouchableOpacity>
+        <View style={s.footerActions}>
+          <TouchableOpacity style={[s.footerBtn, s.ghost]} onPress={onClear}>
+            <Text style={s.btnText}>Clear Cart</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[s.footerBtn, s.primary]} onPress={proceedToCheckout}>
+            <Text style={s.btnText}>Proceed to Checkout</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
-};
+}
 
-export default CartScreen;
-
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B0B0B' },
-  center: {
+  empty: {
     flex: 1,
     backgroundColor: '#0B0B0B',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
   },
-  title: { color: '#FFFFFF', fontSize: 20, fontWeight: '700', marginBottom: 8 },
-  muted: { color: '#9CA3AF', fontSize: 14, textAlign: 'center', marginTop: 8 },
-  headerRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#1F2937',
+  title: { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 8 },
+  muted: { color: '#9CA3AF', fontSize: 14, marginBottom: 16, textAlign: 'center' },
+
+  row: {
+    backgroundColor: '#111216',
+    borderRadius: 16,
+    padding: 12,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 12,
     alignItems: 'center',
-    backgroundColor: '#0B0B0B',
   },
-  headerTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-  clearText: { color: '#EF4444', fontWeight: '600' },
+  thumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: '#0f1012',
+  },
+  name: { color: '#fff', fontWeight: '700' },
+  meta: { color: '#9ca3af', marginTop: 4, fontSize: 12 },
+  lineTotal: { color: '#fff', fontWeight: '800', marginBottom: 8 },
 
-  itemRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12, alignItems: 'center' },
-  thumb: { width: 64, height: 64, borderRadius: 12, backgroundColor: '#111827' },
-  thumbPlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  thumbInitial: { color: '#9CA3AF', fontSize: 18, fontWeight: '700' },
-
-  itemInfo: { flex: 1, marginLeft: 12 },
-  itemName: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  itemPrice: { color: '#9CA3AF', marginTop: 2 },
-
-  qtyRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
-  qtyBtn: {
-    width: 32,
-    height: 32,
+  smallBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#111827',
-    borderWidth: 1,
-    borderColor: '#1F2937',
   },
-  pill: { borderRadius: 16 },
-  qtyBtnText: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-  qtyLabel: { color: '#FFFFFF', fontSize: 16, marginHorizontal: 12, minWidth: 20, textAlign: 'center' },
-  removeBtn: { marginLeft: 12 },
-  removeText: { color: '#EF4444', fontSize: 13, fontWeight: '600' },
+  smallBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
+  ghost: { backgroundColor: '#1f2937' },
+  primary: { backgroundColor: '#ef4444' },
 
-  lineTotalWrap: { marginLeft: 8, alignItems: 'flex-end' },
-  lineTotal: { color: '#FFFFFF', fontWeight: '700' },
-
-  separator: { height: StyleSheet.hairlineWidth, backgroundColor: '#1F2937', marginHorizontal: 16 },
+  btn: {
+    backgroundColor: '#1f2937',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  btnText: { color: '#fff', fontWeight: '700' },
 
   footer: {
     position: 'absolute',
-    left: 0, right: 0, bottom: 0,
-    backgroundColor: '#0B0B0B',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#1F2937',
-    padding: 16,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: 1,
+    borderTopColor: '#1f2937',
+    backgroundColor: '#0b0b0c',
+    padding: 12,
+    paddingBottom: 20,
   },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  summaryLabel: { color: '#9CA3AF', fontSize: 14 },
-  summaryValue: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-  button: {
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  summaryLabel: { color: '#9ca3af' },
+  summaryValue: { color: '#9ca3af', fontWeight: '700' },
+
+  footerActions: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  footerBtn: {
+    flex: 1,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  primary: { backgroundColor: '#E11D48' }, // Rivals red
-  buttonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
-  checkoutBtn: { marginTop: 4 },
 });
