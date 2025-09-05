@@ -1,60 +1,58 @@
-// screens/OrderConfirmationScreen.tsx
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import React, { useMemo } from 'react';
+import { View, Text, Pressable } from 'react-native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useCart } from '../contexts/CartContext';
 import { useInventory } from '../contexts/InventoryContext';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'OrderConfirmation'>;
+type RouteT = RouteProp<RootStackParamList, 'OrderConfirmation'>;
+type NavT = NativeStackNavigationProp<RootStackParamList>;
 
-export default function OrderConfirmationScreen({ route }: Props) {
-  const { orderId } = route.params ?? {};
-  const { items: cartItems, clearCart } = useCart();
+export default function OrderConfirmationScreen() {
+  const navigation = useNavigation<NavT>();
+  const route = useRoute<RouteT>();
+  const orderId = route.params?.orderId;
+
+  const { items: cartItems, clearCart, subtotal } = useCart();
   const { fulfillPurchase } = useInventory();
-  const processedRef = useRef(false);
 
-  useEffect(() => {
-    // ensure we only run once per visit
-    if (processedRef.current) return;
-    processedRef.current = true;
+  const lines = useMemo(
+    () => cartItems.map((c) => ({ id: c.id, quantity: c.quantity })),
+    [cartItems]
+  );
 
-    try {
-      // Decrement inventory and auto-remove 0-qty items
-      fulfillPurchase(
-        (cartItems ?? []).map((c: any) => ({
-          productId: c.productId ?? c.id ?? c.inventoryId, // flexible mapping
-          quantity: Number(c.quantity ?? 1),
-        }))
-      );
-    } catch {
-      // no-op: avoid crashing the confirmation screen
-    } finally {
-      // Clear cart after fulfillment
-      try {
-        clearCart();
-      } catch {}
-    }
-  }, [cartItems, clearCart, fulfillPurchase]);
+  const onFinish = async () => {
+    // Decrement inventory quantities locally, then clear the cart
+    await fulfillPurchase(lines);
+    clearCart();
+    navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
+  };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Order Confirmed 🎉</Text>
-      {orderId ? (
-        <Text style={styles.subtitle}>Order ID: {orderId}</Text>
-      ) : (
-        <Text style={styles.subtitle}>Thank you for your purchase!</Text>
-      )}
-      <Text style={styles.body}>
-        A confirmation has been sent to your email. Your items will ship soon.
+    <View style={{ flex: 1, backgroundColor: '#0b0b0b', padding: 16, gap: 16, justifyContent: 'center' }}>
+      <Text style={{ color: 'white', fontSize: 24, fontWeight: '800', textAlign: 'center' }}>
+        Thank you!
       </Text>
+      {orderId ? (
+        <Text style={{ color: '#9ca3af', textAlign: 'center' }}>Order #{orderId}</Text>
+      ) : null}
+
+      <View style={{ backgroundColor: '#111827', padding: 16, borderRadius: 12, gap: 6 }}>
+        <Text style={{ color: '#9ca3af' }}>
+          Items: {cartItems.length} • Subtotal: ${subtotal.toFixed(2)}
+        </Text>
+        <Text style={{ color: '#6b7280' }}>
+          Your items will be marked as fulfilled in inventory.
+        </Text>
+      </View>
+
+      <Pressable
+        onPress={onFinish}
+        style={{ backgroundColor: '#10b981', paddingVertical: 12, borderRadius: 12, alignItems: 'center' }}
+      >
+        <Text style={{ color: 'white', fontWeight: '800' }}>Done</Text>
+      </Pressable>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 24, fontWeight: '800', marginBottom: 6 },
-  subtitle: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
-  body: { fontSize: 14, color: '#374151', textAlign: 'center' },
-});

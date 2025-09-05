@@ -1,233 +1,99 @@
-// screens/AddCardScreen.tsx
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   TextInput,
   Pressable,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
-  StyleSheet,
   Alert,
 } from 'react-native';
-import { useInventory } from '../contexts/InventoryContext';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../navigation/types';
+import { useInventory, type InventoryItem } from '../contexts/InventoryContext';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'AddCard'>;
-
-const CONDITIONS = ['NM', 'LP', 'MP', 'HP', 'DMG', 'Sealed'];
-
-export default function AddCardScreen({ navigation }: Props) {
+export default function AddCardScreen() {
   const { addItem } = useInventory();
 
-  // Renamed to avoid collisions and be explicit
   const [cardName, setCardName] = useState('');
-  const [cardSetName, setCardSetName] = useState('');
-  const [cardNumber, setCardNumber] = useState('');
-  const [condition, setCondition] = useState<string>('NM');
-  const [price, setPrice] = useState<string>('0');
-  const [quantity, setQuantity] = useState<string>('1');
-  const [imageUrl, setImageUrl] = useState<string>('');
-
-  const canSave = useMemo(() => {
-    const priceNum = Number(price);
-    const qtyNum = Number(quantity);
-    return (
-      cardName.trim().length > 0 &&
-      cardSetName.trim().length > 0 &&
-      cardNumber.trim().length > 0 &&
-      !Number.isNaN(priceNum) &&
-      !Number.isNaN(qtyNum) &&
-      priceNum >= 0 &&
-      qtyNum > 0
-    );
-  }, [cardName, cardSetName, cardNumber, price, quantity]);
+  const [setName, setSetName] = useState('');
+  const [number, setNumber] = useState('');
+  const [condition, setCondition] = useState('');
+  const [price, setPrice] = useState('');
+  const [quantity, setQuantity] = useState('0');
+  const [imageUrl, setImageUrl] = useState('');
 
   const onSave = () => {
-    if (!canSave) {
-      Alert.alert('Missing or invalid fields', 'Please fill out all required fields.');
+    if (!cardName.trim()) {
+      Alert.alert('Name required', 'Please enter a name.');
       return;
     }
 
-    addItem({
-      name: cardName.trim(),
-      setName: cardSetName.trim(),
-      number: cardNumber.trim(),
-      condition,
-      price: Number(price),
-      quantity: Number(quantity),
-      imageUrl: imageUrl.trim() || undefined,
-    });
+    const skuBase = [setName, number, cardName].filter(Boolean).join('|');
+    const id = `${Date.now()}`;
+    const sku = skuBase || id;
 
-    navigation.goBack();
+    const parsedPrice = Number(price);
+    const parsedQty = Number(quantity);
+
+    const item: InventoryItem = {
+      id,
+      sku,
+      name: cardName.trim(),
+      set: setName.trim() || undefined,
+      number: number.trim() || undefined,
+      condition: condition.trim() || undefined,
+      price: Number.isFinite(parsedPrice) ? parsedPrice : undefined,
+      quantity: Number.isFinite(parsedQty) ? parsedQty : 0,
+      imageUrl: imageUrl.trim() || undefined,
+    };
+
+    addItem(item);
+    Alert.alert('Saved', 'Card added to inventory.');
+    // optionally clear the form:
+    setCardName(''); setSetName(''); setNumber(''); setCondition('');
+    setPrice(''); setQuantity('0'); setImageUrl('');
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.select({ ios: 'padding', android: undefined })}
-    >
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Add Card</Text>
+    <ScrollView style={{ flex: 1, backgroundColor: '#0b0b0b' }} contentContainerStyle={{ padding: 16, gap: 12 }}>
+      <Text style={{ color: 'white', fontSize: 22, fontWeight: '800' }}>Add Card</Text>
 
-        <Field label="Card Name *">
-          <TextInput
-            placeholder="e.g., Charizard"
-            value={cardName}
-            onChangeText={setCardName}
-            style={styles.input}
-          />
-        </Field>
+      <Field label="Name" value={cardName} onChangeText={setCardName} />
+      <Field label="Set" value={setName} onChangeText={setSetName} />
+      <Field label="Number" value={number} onChangeText={setNumber} />
+      <Field label="Condition" value={condition} onChangeText={setCondition} />
+      <Field label="Price" value={price} onChangeText={setPrice} keyboardType="decimal-pad" />
+      <Field label="Quantity" value={quantity} onChangeText={setQuantity} keyboardType="number-pad" />
+      <Field label="Image URL" value={imageUrl} onChangeText={setImageUrl} autoCapitalize="none" />
 
-        <Field label="Set Name *">
-          <TextInput
-            placeholder="e.g., Base Set 2"
-            value={cardSetName}
-            onChangeText={setCardSetName}
-            style={styles.input}
-          />
-        </Field>
-
-        <Field label="Card Number *">
-          <TextInput
-            placeholder='e.g., "15/108"'
-            value={cardNumber}
-            onChangeText={setCardNumber}
-            autoCapitalize="none"
-            style={styles.input}
-          />
-        </Field>
-
-        <Field label="Condition">
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-            {CONDITIONS.map((c) => (
-              <Pressable
-                key={c}
-                onPress={() => setCondition(c)}
-                style={[styles.pill, condition === c && styles.pillActive]}
-              >
-                <Text style={[styles.pillText, condition === c && styles.pillTextActive]}>
-                  {c}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        </Field>
-
-        <Field label="Price *">
-          <TextInput
-            placeholder="e.g., 19.99"
-            keyboardType="decimal-pad"
-            value={price}
-            onChangeText={setPrice}
-            style={styles.input}
-          />
-        </Field>
-
-        <Field label="Quantity *">
-          <TextInput
-            placeholder="e.g., 3"
-            keyboardType="number-pad"
-            value={quantity}
-            onChangeText={setQuantity}
-            style={styles.input}
-          />
-        </Field>
-
-        <Field label="Image URL (optional)">
-          <TextInput
-            placeholder="https://..."
-            autoCapitalize="none"
-            value={imageUrl}
-            onChangeText={setImageUrl}
-            style={styles.input}
-          />
-          <Text style={styles.help}>
-            Tip: paste a stock image URL. We can add camera/gallery or auto-fill later.
-          </Text>
-        </Field>
-
-        <Pressable onPress={onSave} disabled={!canSave} style={[styles.button, !canSave && styles.buttonDisabled]}>
-          <Text style={styles.buttonText}>Save Card</Text>
-        </Pressable>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      <Pressable
+        onPress={onSave}
+        style={{ backgroundColor: '#10b981', paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginTop: 8 }}
+      >
+        <Text style={{ color: 'white', fontWeight: '800' }}>Save</Text>
+      </Pressable>
+    </ScrollView>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  ...props
+}: { label: string } & React.ComponentProps<typeof TextInput>) {
   return (
-    <View style={{ marginBottom: 16 }}>
-      <Text style={styles.label}>{label}</Text>
-      {children}
+    <View style={{ gap: 6 }}>
+      <Text style={{ color: '#9ca3af', fontWeight: '700' }}>{label}</Text>
+      <TextInput
+        placeholder={label}
+        placeholderTextColor="#6b7280"
+        style={{
+          borderWidth: 1,
+          borderColor: '#333',
+          color: 'white',
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          borderRadius: 10,
+        }}
+        {...props}
+      />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    padding: 16,
-    gap: 8,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    backgroundColor: '#fff',
-  },
-  pill: {
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
-  },
-  pillActive: {
-    borderColor: '#111827',
-  },
-  pillText: {
-    fontSize: 14,
-    color: '#374151',
-    fontWeight: '600',
-  },
-  pillTextActive: {
-    color: '#111827',
-  },
-  button: {
-    marginTop: 8,
-    backgroundColor: '#ef4444',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  buttonText: {
-    color: '#fff',
-    fontWeight: '800',
-    fontSize: 16,
-    letterSpacing: 0.3,
-  },
-  help: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 6,
-  },
-});

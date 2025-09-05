@@ -1,93 +1,103 @@
-import React, { useState } from "react";
+import React, { useState } from 'react';
 import {
   View,
   Text,
   TextInput,
-  Button,
-  StyleSheet,
-  Alert,
+  Pressable,
   TouchableOpacity,
-} from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import { useAuth } from "../contexts/AuthContext";
+  ActivityIndicator,
+} from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/types';
+import { useAuth } from '../contexts/AuthContext';
 
-const SignupScreen = () => {
-  const navigation = useNavigation();
-  const { login } = useAuth();
-  const [email, setEmail] = useState("");
-  const [confirmEmail, setConfirmEmail] = useState("");
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-  const handleSignup = () => {
-    if (!email || !confirmEmail) {
-      Alert.alert("Error", "Please fill in all fields.");
-      return;
+export default function SignupScreen() {
+  const navigation = useNavigation<Nav>();
+  const { login, isLoading } = useAuth(); // reuse login as mock sign-up
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const busy = isLoading || submitting;
+
+  const onSubmit = async () => {
+    if (!email.trim()) return;
+    try {
+      setSubmitting(true);
+      // In a real app, call your signup API then log in.
+      await login(email.trim(), password);
+      navigation.reset({ index: 0, routes: [{ name: 'Tabs' }] });
+    } finally {
+      setSubmitting(false);
     }
-
-    if (email !== confirmEmail) {
-      Alert.alert("Error", "Emails do not match.");
-      return;
-    }
-
-    login(email);
-    navigation.navigate("Main");
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create an Account</Text>
+    <View style={{ flex: 1, backgroundColor: '#0b0b0b', padding: 16, gap: 12, justifyContent: 'center' }}>
+      <Text style={{ color: 'white', fontSize: 24, fontWeight: '800', marginBottom: 8 }}>
+        Create account
+      </Text>
 
       <TextInput
         placeholder="Email"
-        style={styles.input}
-        value={email}
+        placeholderTextColor="#888"
         autoCapitalize="none"
         keyboardType="email-address"
+        value={email}
         onChangeText={setEmail}
+        style={{
+          borderWidth: 1,
+          borderColor: '#333',
+          color: 'white',
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          borderRadius: 10,
+        }}
       />
 
       <TextInput
-        placeholder="Confirm Email"
-        style={styles.input}
-        value={confirmEmail}
-        autoCapitalize="none"
-        keyboardType="email-address"
-        onChangeText={setConfirmEmail}
+        placeholder="Password"
+        placeholderTextColor="#888"
+        secureTextEntry
+        value={password}
+        onChangeText={setPassword}
+        style={{
+          borderWidth: 1,
+          borderColor: '#333',
+          color: 'white',
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          borderRadius: 10,
+        }}
       />
 
-      <Button title="Sign Up" onPress={handleSignup} />
+      <Pressable
+        onPress={onSubmit}
+        disabled={busy}
+        style={{
+          backgroundColor: busy ? '#6b7280' : '#10b981',
+          paddingHorizontal: 16,
+          paddingVertical: 12,
+          borderRadius: 12,
+          alignItems: 'center',
+          marginTop: 4,
+        }}
+      >
+        {busy ? (
+          <ActivityIndicator />
+        ) : (
+          <Text style={{ color: 'white', fontWeight: '800' }}>Sign up</Text>
+        )}
+      </Pressable>
 
-      <TouchableOpacity onPress={() => navigation.navigate("Login")}>
-        <Text style={styles.linkText}>Already have an account? Log in here.</Text>
-      </TouchableOpacity>
+      <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+        <Text style={{ color: '#9ca3af' }}>Already have an account?</Text>
+        <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+          <Text style={{ color: '#93c5fd', fontWeight: '700' }}>Log in</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
-};
-
-const styles = StyleSheet.create({
-  container: {
-    padding: 24,
-    flex: 1,
-    backgroundColor: "#fff",
-    justifyContent: "center",
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: "bold",
-    marginBottom: 24,
-    textAlign: "center",
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  linkText: {
-    marginTop: 16,
-    color: "#007bff",
-    textAlign: "center",
-  },
-});
-
-export default SignupScreen;
+}

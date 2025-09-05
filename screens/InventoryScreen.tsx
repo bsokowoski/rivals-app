@@ -1,164 +1,141 @@
-// screens/InventoryScreen.tsx
-import React from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
   FlatList,
-  Image,
-  TouchableOpacity,
-  StyleSheet,
+  Pressable,
+  TextInput,
   ActivityIndicator,
-  RefreshControl,
-  Alert,
+  Image,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useInventory, type InventoryItem } from '../contexts/InventoryContext';
 import { useCart } from '../contexts/CartContext';
-import { useInventory } from '../contexts/InventoryContext';
+import { upsertItem as addToCollection } from '../services/collection';
 
-const currency = (n: number) =>
-  n > 0
-    ? Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n)
-    : '—';
+export default function InventoryScreen() {
+  const { items, isLoading, isHydrated, refresh } = useInventory();
+  const { addItem } = useCart();
 
-const InventoryScreen: React.FC = () => {
-  const navigation = useNavigation<any>();
-  const { addToCart, isHydrated } = useCart();
-  const { items, isLoading, error, refresh } = useInventory();
+  const [query, setQuery] = useState('');
 
-  const handleAdd = (p: { id: string; name: string; price: number; image?: string }) => {
-    if (!isHydrated) return;
-    addToCart({ id: p.id, name: p.name, price: p.price, image: p.image, quantity: 1 });
-    Alert.alert('Added to cart', `${p.name} has been added.`);
-  };
-
-  if (!isHydrated || (isLoading && items.length === 0)) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.muted}>Loading inventory…</Text>
-      </View>
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((it) =>
+      [it.name, it.set, it.number, it.sku]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(q))
     );
-  }
+  }, [items, query]);
 
-  if (error && items.length === 0) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.title}>Couldn’t load inventory</Text>
-        <Text style={styles.muted}>{error}</Text>
-        <TouchableOpacity style={[styles.button, styles.primary]} onPress={refresh}>
-          <Text style={styles.buttonText}>Try again</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  // <-- CHANGED: accept InventoryItem (price optional) and normalize internally
+  const handleAdd = useCallback(
+    (item: InventoryItem) => {
+      // CartContext accepts missing price, but ensure quantity at least 1
+      addItem(
+        {
+          ...item,
+          quantity: Math.max(1, Number(item.quantity ?? 1)),
+          // if price is missing, CartContext will treat as 0 in totals
+        },
+        1
+      );
+    },
+    [addItem]
+  );
 
-  if (!items || items.length === 0) {
+  const handleAddToCollection = useCallback(async (item: InventoryItem) => {
+    await addToCollection({
+      ...item,
+      quantity: Math.max(1, Number(item.quantity ?? 1)),
+    });
+  }, []);
+
+  if (isLoading && !isHydrated) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.title}>No products yet</Text>
-        <Text style={styles.muted}>Check back soon as we add inventory.</Text>
-        <TouchableOpacity style={[styles.button, styles.primary]} onPress={refresh}>
-          <Text style={styles.buttonText}>Refresh</Text>
-        </TouchableOpacity>
+      <View style={{ flex: 1, backgroundColor: '#0b0b0b', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={{ flex: 1, backgroundColor: '#0b0b0b' }}>
+      <View style={{ padding: 16, gap: 12 }}>
+        <Text style={{ color: 'white', fontSize: 22, fontWeight: '800' }}>Inventory</Text>
+        <TextInput
+          placeholder="Search name, set, number, sku…"
+          placeholderTextColor="#888"
+          value={query}
+          onChangeText={setQuery}
+          style={{
+            borderWidth: 1,
+            borderColor: '#333',
+            color: 'white',
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            borderRadius: 10,
+          }}
+        />
+      </View>
+
       <FlatList
-        data={items}
-        keyExtractor={(item) => item.id}
-        numColumns={2}
-        columnWrapperStyle={styles.column}
-        contentContainerStyle={{ padding: 12, paddingBottom: 120 }}
-        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refresh} tintColor="#fff" />}
+        data={filtered}
+        keyExtractor={(it) => it.id}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+        ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#1f2937' }} />}
+        onRefresh={refresh}
+        refreshing={false}
         renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.card}
-            activeOpacity={0.9}
-            onPress={() => navigation.navigate('ProductDetails', { product: item })}
-          >
-            {item.image ? (
-              <Image source={{ uri: item.image }} style={styles.image} />
+          <View style={{ flexDirection: 'row', paddingVertical: 12, gap: 12 }}>
+            {item.imageUrl ? (
+              <Image
+                source={{ uri: String(item.imageUrl) }}
+                resizeMode="cover"
+                style={{ width: 64, height: 64, borderRadius: 8, backgroundColor: '#111827' }}
+              />
             ) : (
-              <View style={[styles.image, styles.imgPlaceholder]}>
-                <Text style={styles.imgInitial}>{item.name?.[0]?.toUpperCase() ?? '?'}</Text>
+              <View style={{ width: 64, height: 64, borderRadius: 8, backgroundColor: '#111827', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ color: '#6b7280', fontSize: 12 }}>No image</Text>
               </View>
             )}
 
-            <View style={styles.meta}>
-              <Text style={styles.name} numberOfLines={1}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={{ color: 'white', fontWeight: '700' }} numberOfLines={1}>
                 {item.name}
               </Text>
+              <Text style={{ color: '#9ca3af' }} numberOfLines={1}>
+                {item.set ?? '—'} {item.number ? `#${item.number}` : ''}
+              </Text>
+              <Text style={{ color: '#9ca3af' }}>
+                Qty: {item.quantity ?? 0} • Price:{' '}
+                {typeof item.price === 'number' ? `$${item.price.toFixed(2)}` : '—'}
+              </Text>
 
-              {(item as any).setName || (item as any).rarity ? (
-                <Text style={styles.sub} numberOfLines={1}>
-                  {(item as any).setName ?? ''}
-                  {(item as any).setName && (item as any).rarity ? ' · ' : ''}
-                  {(item as any).rarity ?? ''}
-                </Text>
-              ) : null}
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                <Pressable
+                  onPress={() => handleAdd(item)}
+                  style={{ backgroundColor: '#0ea5e9', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}
+                >
+                  <Text style={{ color: 'white', fontWeight: '700' }}>Add to Cart</Text>
+                </Pressable>
 
-              <Text style={styles.price}>{currency(item.price)}</Text>
-
-              <TouchableOpacity
-                style={[styles.button, styles.primary, !isHydrated && styles.disabled]}
-                disabled={!isHydrated}
-                onPress={() => handleAdd(item)}
-              >
-                <Text style={styles.buttonText}>{isHydrated ? 'Add to Cart' : 'Loading…'}</Text>
-              </TouchableOpacity>
+                <Pressable
+                  onPress={() => handleAddToCollection(item)}
+                  style={{ backgroundColor: '#10b981', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}
+                >
+                  <Text style={{ color: 'white', fontWeight: '700' }}>Add to Collection</Text>
+                </Pressable>
+              </View>
             </View>
-          </TouchableOpacity>
+          </View>
         )}
+        ListEmptyComponent={
+          <View style={{ padding: 24, alignItems: 'center' }}>
+            <Text style={{ color: '#9ca3af' }}>No items match your search.</Text>
+          </View>
+        }
       />
     </View>
   );
-};
-
-export default InventoryScreen;
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0B0B0B' },
-  center: {
-    flex: 1,
-    backgroundColor: '#0B0B0B',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  title: { color: '#FFFFFF', fontSize: 20, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
-  muted: { color: '#9CA3AF', fontSize: 14, textAlign: 'center', marginTop: 8 },
-
-  column: { gap: 12, paddingHorizontal: 0 },
-  card: {
-    flex: 1,
-    backgroundColor: '#111827',
-    borderRadius: 16,
-    padding: 10,
-    margin: 6,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: '#1F2937',
-  },
-  image: { width: '100%', height: 140, borderRadius: 12, backgroundColor: '#0B0B0B' },
-  imgPlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  imgInitial: { color: '#9CA3AF', fontSize: 22, fontWeight: '700' },
-
-  meta: { gap: 6 },
-  name: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
-  sub: { color: '#9CA3AF', fontSize: 12 },
-  price: { color: '#9CA3AF', fontSize: 13 },
-
-  button: {
-    marginTop: 4,
-    paddingVertical: 10,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primary: { backgroundColor: '#E11D48' },
-  disabled: { opacity: 0.6 },
-  buttonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
-});
+}

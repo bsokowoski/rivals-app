@@ -1,103 +1,128 @@
-// contexts/CartContext.tsx
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+import type { InventoryItem } from './InventoryContext';
 
-export interface CartItem {
+export type CartItem = {
   id: string;
   name: string;
-  price: number;
-  image?: string;
-  quantity: number;
-}
+  price?: number;      // price may be missing on some items; treat missing as 0 in totals
+  imageUrl?: string;
+  quantity: number;    // always >= 1 in cart
+  sku?: string;
+  set?: string;
+  number?: string | number;
+  [key: string]: any;
+};
 
-interface CartContextValue {
-  cart: CartItem[];
-  addToCart: (item: CartItem) => void;
-  removeFromCart: (id: string) => void;
+export type CartContextValue = {
+  items: CartItem[];
+  addItem: (item: InventoryItem | CartItem, qty?: number) => void;
+  removeItem: (id: string) => void;
+  increment: (id: string, delta?: number) => void;
+  decrement: (id: string, delta?: number) => void;
+  setQuantity: (id: string, qty: number) => void;
   clearCart: () => void;
-  updateQuantity: (id: string, quantity: number) => void;
-  total: number;
-  isHydrated: boolean; // ✅ flag for when storage is loaded
+  totalCount: number;
+  subtotal: number;
+};
+
+const CartContext = createContext<CartContextValue | null>(null);
+
+function normalizeToCartItem(
+  item: InventoryItem | CartItem,
+  qty: number
+): CartItem {
+  const baseQty = Math.max(1, Math.floor(qty || 1));
+  return {
+    id: String((item as any).id),
+    name: String((item as any).name ?? 'Unknown'),
+    price: typeof (item as any).price === 'number' ? (item as any).price : undefined,
+    imageUrl: (item as any).imageUrl,
+    sku: (item as any).sku,
+    set: (item as any).set,
+    number: (item as any).number,
+    quantity: baseQty,
+    ...item, // keep any extra fields
+  };
 }
 
-const CartContext = createContext<CartContextValue | undefined>(undefined);
+export function CartProvider({ children }: { children: ReactNode }) {
+  const [items, setItems] = useState<CartItem[]>([]);
 
-export const CartProvider = ({ children }: { children: ReactNode }) => {
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [isHydrated, setIsHydrated] = useState(false);
-
-  // Key used for AsyncStorage
-  const STORAGE_KEY = 'rivals_cart';
-
-  // Load cart from storage on mount
-  useEffect(() => {
-    const loadCart = async () => {
-      try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          setCart(JSON.parse(stored));
-        }
-      } catch (err) {
-        console.error('Failed to load cart:', err);
-      } finally {
-        setIsHydrated(true);
+  const addItem = (item: InventoryItem | CartItem, qty = 1) => {
+    const normalized = normalizeToCartItem(item, qty);
+    setItems((prev) => {
+      const idx = prev.findIndex((p) => p.id === normalized.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], quantity: next[idx].quantity + normalized.quantity };
+        return next;
       }
-    };
-    loadCart();
-  }, []);
-
-  // Save cart whenever it changes
-  useEffect(() => {
-    if (isHydrated) {
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(cart)).catch((err) =>
-        console.error('Failed to save cart:', err)
-      );
-    }
-  }, [cart, isHydrated]);
-
-  const addToCart = (item: CartItem) => {
-    setCart((prev) => {
-      const existing = prev.find((i) => i.id === item.id);
-      if (existing) {
-        return prev.map((i) =>
-          i.id === item.id ? { ...i, quantity: i.quantity + item.quantity } : i
-        );
-      }
-      return [...prev, item];
+      return [...prev, normalized];
     });
   };
 
-  const removeFromCart = (id: string) => {
-    setCart((prev) => prev.filter((item) => item.id !== id));
+  const removeItem = (id: string) => {
+    setItems((prev) => prev.filter((p) => p.id !== id));
   };
 
-  const clearCart = () => {
-    setCart([]);
+  const increment = (id: string, delta = 1) => {
+    setItems((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, quantity: Math.max(1, p.quantity + delta) } : p))
+    );
   };
 
-  const updateQuantity = (id: string, quantity: number) => {
-    setCart((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, quantity: Math.max(1, quantity) } : item
+  const decrement = (id: string, delta = 1) => {
+    setItems((prev) =>
+      prev.map((p) =>
+        p.id === id ? { ...p, quantity: Math.max(1, p.quantity - delta) } : p
       )
     );
   };
 
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const setQuantity = (id: string, qty: number) => {
+    const q = Math.max(1, Math.floor(qty || 1));
+    setItems((prev) => prev.map((p) => (p.id === id ? { ...p, quantity: q } : p)));
+  };
 
-  return (
-    <CartContext.Provider
-      value={{ cart, addToCart, removeFromCart, clearCart, updateQuantity, total, isHydrated }}
-    >
-      {children}
-    </CartContext.Provider>
+  const clearCart = () => setItems([]);
+
+  const totalCount = useMemo(
+    () => items.reduce((sum, i) => sum + Number(i.quantity || 0), 0),
+    [items]
   );
-};
 
-export const useCart = (): CartContextValue => {
-  const context = useContext(CartContext);
-  if (!context) {
-    throw new Error('useCart must be used within a CartProvider');
-  }
-  return context;
-};
+  const subtotal = useMemo(
+    () =>
+      items.reduce((sum, i) => {
+        const price = typeof i.price === 'number' ? i.price : 0;
+        return sum + price * (i.quantity || 0);
+      }, 0),
+    [items]
+  );
+
+  const value: CartContextValue = {
+    items,
+    addItem,
+    removeItem,
+    increment,
+    decrement,
+    setQuantity,
+    clearCart,
+    totalCount,
+    subtotal,
+  };
+
+  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
+}
+
+export function useCart() {
+  const ctx = useContext(CartContext);
+  if (!ctx) throw new Error('useCart must be used within CartProvider');
+  return ctx;
+}

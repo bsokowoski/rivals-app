@@ -5,10 +5,12 @@ import HomeScreen from '../screens/HomeScreen';
 import InventoryScreen from '../screens/InventoryScreen';
 import CartScreen from '../screens/CartScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import CollectionScreen from '../screens/CollectionScreen';
 
 export type RootTabParamList = {
   Home: undefined;
   Inventory: undefined;
+  Collection: undefined;
   Cart: undefined;
   Profile: undefined;
 };
@@ -18,6 +20,7 @@ const Tab = createBottomTabNavigator<RootTabParamList>();
 export default function TabNavigator() {
   return (
     <Tab.Navigator
+      id={undefined}
       screenOptions={{
         headerShown: false,
         tabBarStyle: { backgroundColor: '#0b0b0b' },
@@ -27,6 +30,7 @@ export default function TabNavigator() {
     >
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Inventory" component={InventoryScreen} />
+      <Tab.Screen name="Collection" component={CollectionScreen} />
       <Tab.Screen name="Cart" component={CartScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>

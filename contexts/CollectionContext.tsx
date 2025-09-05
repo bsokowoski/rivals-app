@@ -1,158 +1,102 @@
-// contexts/CollectionContext.tsx
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getMarketPrice } from "../services/collectr";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+import type { InventoryItem } from './InventoryContext';
+import {
+  getCollection,
+  setCollection as persistCollection,
+  upsertItem,
+  removeItem,
+  clearCollection,
+} from '../services/collection';
 
-export type CollectionItem = {
-  catalogId: string;
-  name: string;
-  setName?: string;
-  number?: string;
-  imageUrl?: string;
-  rarity?: string;
-  condition?: string; // e.g., "NM", "LP", etc.
-  quantity: number;
-  lastPrice?: number; // per-card estimated price (units)
-  currency?: string;  // defaults "USD"
-  updatedAt?: string; // ISO when last valued
+export type CollectionContextValue = {
+  items: InventoryItem[];
+  isLoading: boolean;
+  refresh: () => Promise<void>;
+  add: (item: InventoryItem) => Promise<void>;
+  remove: (id: string) => Promise<void>;
+  clear: () => Promise<void>;
+  setAll: (items: InventoryItem[]) => Promise<void>;
+  count: number;
+  totalQty: number;
+  estValue: number;
 };
 
-type CollectionState = {
-  items: CollectionItem[];
-  totalValue: number;
-  currency: string;
-  addOrIncrement: (item: Omit<CollectionItem, "quantity" | "lastPrice" | "currency" | "updatedAt">, qty?: number) => Promise<void>;
-  setQuantity: (catalogId: string, qty: number, condition?: string) => Promise<void>;
-  removeItem: (catalogId: string, condition?: string) => Promise<void>;
-  refreshValuations: () => Promise<void>;
-  clearAll: () => Promise<void>;
-};
+const CollectionContext = createContext<CollectionContextValue | null>(null);
 
-const CollectionCtx = createContext<CollectionState | null>(null);
-const STORAGE_KEY = "rivals.collection.v1";
+export function CollectionProvider({ children }: { children: ReactNode }) {
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-export const CollectionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [items, setItems] = useState<CollectionItem[]>([]);
-  const [currency, setCurrency] = useState<string>("USD");
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed: CollectionItem[] = JSON.parse(raw);
-          setItems(parsed);
-          const cur = parsed.find(i => i.currency)?.currency;
-          if (cur) setCurrency(cur);
-        }
-      } catch {}
-    })();
+  const refresh = useCallback(async () => {
+    try {
+      const data = await getCollection();
+      setItems(data);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items)).catch(() => {});
+    refresh();
+  }, [refresh]);
+
+  const add = useCallback(async (item: InventoryItem) => {
+    await upsertItem({ ...item, quantity: Math.max(1, Number(item.quantity ?? 1)) });
+    await refresh();
+  }, [refresh]);
+
+  const remove = useCallback(async (id: string) => {
+    await removeItem(id);
+    await refresh();
+  }, [refresh]);
+
+  const clear = useCallback(async () => {
+    await clearCollection();
+    await refresh();
+  }, [refresh]);
+
+  const setAll = useCallback(async (next: InventoryItem[]) => {
+    await persistCollection(next);
+    await refresh();
+  }, [refresh]);
+
+  const { count, totalQty, estValue } = useMemo(() => {
+    const count = items.length;
+    const totalQty = items.reduce((s, i) => s + Number(i.quantity ?? 0), 0);
+    const estValue = items.reduce((s, i) => {
+      const p = typeof i.price === 'number' ? i.price : 0;
+      const q = Number(i.quantity ?? 1);
+      return s + p * q;
+    }, 0);
+    return { count, totalQty, estValue };
   }, [items]);
 
-  const totalValue = useMemo(
-    () => items.reduce((sum, i) => sum + (i.lastPrice ?? 0) * i.quantity, 0),
-    [items]
-  );
-
-  const upsert = (incoming: CollectionItem) => {
-    setItems(prev => {
-      const idx = prev.findIndex(
-        p => p.catalogId === incoming.catalogId && (p.condition || "NM") === (incoming.condition || "NM")
-      );
-      if (idx >= 0) {
-        const clone = [...prev];
-        clone[idx] = { ...clone[idx], ...incoming };
-        return clone;
-      }
-      return [incoming, ...prev];
-    });
-  };
-
-  const addOrIncrement: CollectionState["addOrIncrement"] = async (base, qty = 1) => {
-    const condition = base.condition || "NM";
-    // Try to value immediately for better UX
-    try {
-      const { price, currency: cur } = await getMarketPrice({ catalogId: base.catalogId, condition });
-      setCurrency(cur);
-      upsert({
-        ...base,
-        condition,
-        quantity: qty,
-        lastPrice: price ?? undefined,
-        currency: cur,
-        updatedAt: new Date().toISOString(),
-      });
-    } catch {
-      upsert({
-        ...base,
-        condition,
-        quantity: qty,
-        currency,
-      });
-    }
-  };
-
-  const setQuantity: CollectionState["setQuantity"] = async (catalogId, qty, condition = "NM") => {
-    setItems(prev =>
-      prev.map(i =>
-        i.catalogId === catalogId && (i.condition || "NM") === condition
-          ? { ...i, quantity: qty }
-          : i
-      )
-    );
-  };
-
-  const removeItem: CollectionState["removeItem"] = async (catalogId, condition = "NM") => {
-    setItems(prev => prev.filter(i => !(i.catalogId === catalogId && (i.condition || "NM") === condition)));
-  };
-
-  const refreshValuations: CollectionState["refreshValuations"] = async () => {
-    const updated: CollectionItem[] = [];
-    for (const i of items) {
-      try {
-        const { price, currency: cur } = await getMarketPrice({
-          catalogId: i.catalogId,
-          condition: i.condition || "NM",
-        });
-        updated.push({
-          ...i,
-          lastPrice: price ?? i.lastPrice,
-          currency: cur ?? i.currency,
-          updatedAt: new Date().toISOString(),
-        });
-        if (cur) setCurrency(cur);
-      } catch {
-        updated.push(i);
-      }
-    }
-    setItems(updated);
-  };
-
-  const clearAll = async () => {
-    setItems([]);
-    await AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
-  };
-
-  const value: CollectionState = {
+  const value: CollectionContextValue = {
     items,
-    totalValue,
-    currency,
-    addOrIncrement,
-    setQuantity,
-    removeItem,
-    refreshValuations,
-    clearAll,
+    isLoading,
+    refresh,
+    add,
+    remove,
+    clear,
+    setAll,
+    count,
+    totalQty,
+    estValue,
   };
 
-  return <CollectionCtx.Provider value={value}>{children}</CollectionCtx.Provider>;
-};
+  return <CollectionContext.Provider value={value}>{children}</CollectionContext.Provider>;
+}
 
-export const useCollection = () => {
-  const ctx = useContext(CollectionCtx);
-  if (!ctx) throw new Error("useCollection must be used within CollectionProvider");
+export function useCollection() {
+  const ctx = useContext(CollectionContext);
+  if (!ctx) throw new Error('useCollection must be used within CollectionProvider');
   return ctx;
-};
+}

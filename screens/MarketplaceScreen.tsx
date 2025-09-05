@@ -1,100 +1,37 @@
-import React, { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  FlatList,
-  Image,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-} from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import { useCart } from "../contexts/CartContext";
-import { API_BASE_URL } from "@env";
+import React from 'react';
+import { View, Text, FlatList, Pressable } from 'react-native';
+import { useInventory, type InventoryItem } from '../contexts/InventoryContext';
+import { useCart } from '../contexts/CartContext';
 
-const MarketplaceScreen = () => {
-  const navigation = useNavigation<any>();
-  const { addToCart } = useCart();
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
+export default function MarketplaceScreen() {
+  const { items } = useInventory();
+  const { addItem } = useCart(); // was addToCart
 
-  useEffect(() => {
-    const fetchInventory = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/inventory`);
-        const data = await res.json();
-        setProducts(data);
-      } catch (err) {
-        console.error("Error fetching inventory", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchInventory();
-  }, []);
-
-  const renderItem = ({ item }: { item: any }) => (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => navigation.navigate("ProductDetails", { productId: item.id })}
-    >
-      <Image source={{ uri: item.image }} style={styles.image} />
-      <View style={styles.info}>
-        <Text style={styles.name}>{item.name}</Text>
-        <Text>${item.price}</Text>
-        <TouchableOpacity style={styles.addButton} onPress={() => addToCart(item)}>
-          <Text style={styles.addButtonText}>Add to Cart</Text>
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
-
-  if (loading) {
-    return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
+  const onAddToCart = (it: InventoryItem) => {
+    addItem({ ...it, quantity: Math.max(1, Number(it.quantity ?? 1)) }, 1);
+  };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Marketplace</Text>
+    <View style={{ flex: 1, backgroundColor: '#0b0b0b' }}>
       <FlatList
-        data={products}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={{ paddingBottom: 100 }}
+        data={items}
+        keyExtractor={(it) => it.id}
+        renderItem={({ item }) => (
+          <View style={{ padding: 12, borderBottomWidth: 1, borderColor: '#1f2937' }}>
+            <Text style={{ color: 'white', fontWeight: '700' }}>{item.name}</Text>
+            <Text style={{ color: '#9ca3af' }}>
+              {item.set ?? '—'} {item.number ? `#${item.number}` : ''} •{' '}
+              {typeof item.price === 'number' ? `$${item.price.toFixed(2)}` : '—'}
+            </Text>
+            <Pressable
+              onPress={() => onAddToCart(item)}
+              style={{ backgroundColor: '#0ea5e9', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, marginTop: 8 }}
+            >
+              <Text style={{ color: 'white', fontWeight: '700' }}>Add to Cart</Text>
+            </Pressable>
+          </View>
+        )}
       />
     </View>
   );
-};
-
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: "#fff" },
-  title: { fontSize: 22, fontWeight: "bold", marginBottom: 12 },
-  card: {
-    flexDirection: "row",
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 10,
-    overflow: "hidden",
-  },
-  image: { width: 100, height: 100 },
-  info: { flex: 1, padding: 12 },
-  name: { fontSize: 18, fontWeight: "bold" },
-  addButton: {
-    marginTop: 8,
-    backgroundColor: "#007bff",
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    alignSelf: "flex-start",
-  },
-  addButtonText: { color: "#fff", fontWeight: "600" },
-  loading: { flex: 1, justifyContent: "center", alignItems: "center" },
-});
-
-export default MarketplaceScreen;
+}

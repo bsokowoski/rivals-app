@@ -13,15 +13,7 @@ import OrderConfirmationScreen from '../screens/OrderConfirmationScreen';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { CartProvider } from '../contexts/CartContext';
 import { InventoryProvider } from '../contexts/InventoryContext';
-
-export type RootStackParamList = {
-  Tabs: undefined;
-  ProductDetails: { id?: string } | undefined;
-  Checkout: undefined;
-  OrderConfirmation: { orderId?: string } | undefined;
-  SellerDashboard: undefined;
-  SalesStats: undefined;
-};
+import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -32,10 +24,8 @@ function useIsSeller() {
   return Boolean((role && String(role).toLowerCase() === 'seller') || isSellerFlag);
 }
 
-const SellerDashboardGate = () => (useIsSeller() ? <SellerDashboardScreen /> : <NotAuthorizedScreen />);
-const SalesStatsGate = () => (useIsSeller() ? <SalesStatsScreen /> : <NotAuthorizedScreen />);
-
 export default function AppNavigator() {
+  const isSeller = useIsSeller();
   return (
     <NavigationContainer
       theme={{ ...DefaultTheme, colors: { ...DefaultTheme.colors, background: '#0b0b0b' } }}
@@ -44,17 +34,59 @@ export default function AppNavigator() {
         <CartProvider>
           <InventoryProvider>
             <Stack.Navigator
+              id={undefined}
               screenOptions={{
                 headerStyle: { backgroundColor: '#0b0b0b' },
                 headerTintColor: 'white',
               }}
             >
-              <Stack.Screen name="Tabs" component={TabNavigator} options={{ headerShown: false }} />
-              <Stack.Screen name="ProductDetails" component={ProductDetailsScreen} options={{ title: 'Details' }} />
-              <Stack.Screen name="Checkout" component={CheckoutScreen} options={{ title: 'Checkout' }} />
-              <Stack.Screen name="OrderConfirmation" component={OrderConfirmationScreen} options={{ title: 'Thank you!' }} />
-              <Stack.Screen name="SellerDashboard" component={SellerDashboardGate} options={{ title: 'Seller Dashboard' }} />
-              <Stack.Screen name="SalesStats" component={SalesStatsGate} options={{ title: 'Sales Stats' }} />
+              <Stack.Screen
+                name="Tabs"
+                component={TabNavigator}
+                options={{ headerShown: false }}
+              />
+
+              <Stack.Screen
+                name="ProductDetails"
+                component={ProductDetailsScreen}
+                options={{ title: 'Details' }}
+              />
+
+              <Stack.Screen
+                name="Checkout"
+                component={CheckoutScreen}
+                options={{ title: 'Checkout' }}
+              />
+
+              <Stack.Screen
+                name="OrderConfirmation"
+                component={OrderConfirmationScreen}
+                options={{ title: 'Thank you!' }}
+              />
+
+              {/* Gates use render-prop form so navigation/route are forwarded */}
+              <Stack.Screen
+                name="SellerDashboard"
+                options={{ title: 'Seller Dashboard' }}
+              >
+                {(props) =>
+                  isSeller ? (
+                    <SellerDashboardScreen {...(props as any)} />
+                  ) : (
+                    <NotAuthorizedScreen {...(props as any)} />
+                  )
+                }
+              </Stack.Screen>
+
+              <Stack.Screen name="SalesStats" options={{ title: 'Sales Stats' }}>
+                {(props) =>
+                  isSeller ? (
+                    <SalesStatsScreen {...(props as any)} />
+                  ) : (
+                    <NotAuthorizedScreen {...(props as any)} />
+                  )
+                }
+              </Stack.Screen>
             </Stack.Navigator>
           </InventoryProvider>
         </CartProvider>

@@ -1,221 +1,173 @@
-// screens/ProductDetailsScreen.tsx
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
   Image,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
+  Pressable,
   Alert,
+  ActivityIndicator,
+  ScrollView,
 } from 'react-native';
-import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
-import { useCart } from '../contexts/CartContext';
+import { useRoute, type RouteProp } from '@react-navigation/native';
+import type { RootStackParamList } from '../navigation/types';
+import { useInventory, type InventoryItem } from '../contexts/InventoryContext';
+import { getCollection, upsertItem } from '../services/collection';
 
-// If you have centralized types for navigation, you can import RootStackParamList.
-// For now we define a minimal local type to keep this screen drop-in ready.
-type Product = {
-  id: string;
-  name: string;
-  price: number;
-  image?: string;
-  // add any extra fields you need (set, rarity, condition, etc.)
-};
+type ProductDetailsRoute = RouteProp<RootStackParamList, 'ProductDetails'>;
 
-type LocalStackParams = {
-  ProductDetails: { product: Product };
-};
+export default function ProductDetailsScreen() {
+  const route = useRoute<ProductDetailsRoute>();
+  const paramId = route.params?.id;
 
-const currency = (n: number) =>
-  Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
+  const { items, isHydrated, isLoading } = useInventory();
+  const [qty, setQty] = useState<number>(1);
+  const [saving, setSaving] = useState(false);
 
-const ProductDetailsScreen: React.FC = () => {
-  const navigation = useNavigation<any>();
-  const route = useRoute<RouteProp<LocalStackParams, 'ProductDetails'>>();
-  const { product } = route.params || {};
+  // If caller passed a whole item (optional), prefer that; else find by id
+  const paramItem = (route.params as any)?.item as InventoryItem | undefined;
 
-  const { addToCart, isHydrated } = useCart();
+  const item: InventoryItem | undefined = useMemo(() => {
+    if (paramItem) return paramItem;
+    if (!paramId) return undefined;
+    return items.find((i) => i.id === String(paramId));
+  }, [items, paramItem, paramId]);
 
-  const [qty, setQty] = useState(1);
+  const inc = () => setQty((n) => Math.min(999, n + 1));
+  const dec = () => setQty((n) => Math.max(1, n - 1));
 
-  const price = useMemo(() => product?.price ?? 0, [product]);
-  const lineTotal = useMemo(() => price * qty, [price, qty]);
+  const addToCollection = async () => {
+    if (!item) return;
+    try {
+      setSaving(true);
+      const current = await getCollection();
+      const existing = current.find((i) => i.id === item.id);
+      const existingQty = Number(existing?.quantity ?? 0);
+      const nextQty = existingQty + qty;
 
-  const handleDecrease = () => setQty((q) => Math.max(1, q - 1));
-  const handleIncrease = () => setQty((q) => q + 1);
+      // Persist merged quantity
+      await upsertItem({
+        ...item,
+        quantity: nextQty,
+      });
 
-  const handleAdd = () => {
-    if (!isHydrated || !product) return;
-    addToCart({
-      id: product.id,
-      name: product.name,
-      price: product.price,
-      image: product.image,
-      quantity: qty,
-    });
-    Alert.alert('Added to cart', `${product.name} ×${qty} added.`);
+      Alert.alert(
+        'Added to Collection',
+        `${item.name} • +${qty} (now ${nextQty})`
+      );
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Failed to save to collection.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  if (!product) {
+  if (isLoading && !isHydrated) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.title}>Product not found</Text>
-        <Text style={styles.muted}>Try returning to inventory.</Text>
-        <TouchableOpacity style={[styles.button, styles.primary]} onPress={() => navigation.navigate('Inventory')}>
-          <Text style={styles.buttonText}>Back to Inventory</Text>
-        </TouchableOpacity>
+      <View style={{ flex: 1, backgroundColor: '#0b0b0b', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
       </View>
     );
   }
 
-  if (!isHydrated) {
+  if (!item) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.muted}>Loading…</Text>
+      <View style={{ flex: 1, backgroundColor: '#0b0b0b', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <Text style={{ color: 'white', fontSize: 18, fontWeight: '700', textAlign: 'center' }}>
+          Item not found
+        </Text>
+        <Text style={{ color: '#9ca3af', marginTop: 8, textAlign: 'center' }}>
+          Try opening this page from Inventory again.
+        </Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
-        {/* Hero image */}
-        {product.image ? (
-          <Image source={{ uri: product.image }} style={styles.hero} />
-        ) : (
-          <View style={[styles.hero, styles.heroPlaceholder]}>
-            <Text style={styles.heroInitial}>{product.name?.[0]?.toUpperCase() ?? '?'}</Text>
-          </View>
-        )}
-
-        {/* Meta */}
-        <View style={styles.content}>
-          <Text style={styles.name}>{product.name}</Text>
-          <Text style={styles.price}>{currency(product.price)}</Text>
-
-          {/* You can add set/rarity/condition rows here */}
-          {/* <View style={styles.metaRow}><Text style={styles.metaLabel}>Set</Text><Text style={styles.metaValue}>Scarlet & Violet</Text></View> */}
-
-          {/* Quantity selector */}
-          <View style={styles.qtyWrap}>
-            <Text style={styles.qtyLabel}>Quantity</Text>
-            <View style={styles.qtyRow}>
-              <TouchableOpacity style={[styles.qtyBtn, styles.pill]} onPress={handleDecrease}>
-                <Text style={styles.qtyBtnText}>−</Text>
-              </TouchableOpacity>
-              <Text style={styles.qtyValue}>{qty}</Text>
-              <TouchableOpacity style={[styles.qtyBtn, styles.pill]} onPress={handleIncrease}>
-                <Text style={styles.qtyBtnText}>＋</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Line total */}
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Total</Text>
-            <Text style={styles.summaryValue}>{currency(lineTotal)}</Text>
-          </View>
+    <ScrollView style={{ flex: 1, backgroundColor: '#0b0b0b' }} contentContainerStyle={{ padding: 16, gap: 16 }}>
+      {/* Image */}
+      {item.imageUrl ? (
+        <Image
+          source={{ uri: String(item.imageUrl) }}
+          resizeMode="contain"
+          style={{ width: '100%', height: 260, backgroundColor: '#111827', borderRadius: 12 }}
+        />
+      ) : (
+        <View style={{ width: '100%', height: 180, backgroundColor: '#111827', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: '#6b7280' }}>No image</Text>
         </View>
-      </ScrollView>
+      )}
 
-      {/* Sticky footer actions */}
-      <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.button, styles.secondary]}
-          onPress={() => navigation.navigate('Cart')}
-        >
-          <Text style={styles.buttonText}>View Cart</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.button, styles.primary]}
-          onPress={handleAdd}
-          disabled={!isHydrated}
-        >
-          <Text style={styles.buttonText}>{isHydrated ? 'Add to Cart' : 'Loading…'}</Text>
-        </TouchableOpacity>
+      {/* Title + meta */}
+      <View style={{ gap: 6 }}>
+        <Text style={{ color: 'white', fontSize: 22, fontWeight: '800' }}>{item.name}</Text>
+        <Text style={{ color: '#9ca3af' }}>
+          {item.set ?? '—'} {item.number ? `#${item.number}` : ''}
+          {item.rarity ? ` • ${item.rarity}` : ''}
+          {item.condition ? ` • ${item.condition}` : ''}
+        </Text>
+        <Text style={{ color: '#9ca3af' }}>
+          SKU: {item.sku}
+        </Text>
+        <Text style={{ color: 'white', fontSize: 18, fontWeight: '700', marginTop: 6 }}>
+          {typeof item.price === 'number' ? `$${item.price.toFixed(2)}` : '—'}
+        </Text>
       </View>
-    </View>
+
+      {/* Quantity selector */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <Pressable
+          onPress={dec}
+          style={{ backgroundColor: '#1f2937', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 }}
+        >
+          <Text style={{ color: 'white', fontWeight: '800' }}>−</Text>
+        </Pressable>
+        <Text style={{ color: 'white', fontWeight: '800', minWidth: 24, textAlign: 'center' }}>{qty}</Text>
+        <Pressable
+          onPress={inc}
+          style={{ backgroundColor: '#1f2937', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 }}
+        >
+          <Text style={{ color: 'white', fontWeight: '800' }}>＋</Text>
+        </Pressable>
+      </View>
+
+      {/* Actions */}
+      <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
+        <Pressable
+          onPress={addToCollection}
+          disabled={saving}
+          style={{
+            backgroundColor: saving ? '#6b7280' : '#10b981',
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            borderRadius: 12,
+          }}
+        >
+          <Text style={{ color: 'white', fontWeight: '800' }}>
+            {saving ? 'Saving…' : 'Add to Collection'}
+          </Text>
+        </Pressable>
+
+        {/* Placeholder for future: Add to Cart (can wire CartContext later)
+        <Pressable
+          onPress={addToCart}
+          style={{ backgroundColor: '#0ea5e9', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12 }}
+        >
+          <Text style={{ color: 'white', fontWeight: '800' }}>Add to Cart</Text>
+        </Pressable>
+        */}
+      </View>
+
+      {/* Description dump (optional custom fields) */}
+      <View style={{ marginTop: 8, gap: 4 }}>
+        {Object.entries(item)
+          .filter(([k]) => !['id', 'sku', 'name', 'set', 'number', 'rarity', 'condition', 'price', 'quantity', 'imageUrl'].includes(k))
+          .slice(0, 6)
+          .map(([k, v]) => (
+            <Text key={k} style={{ color: '#9ca3af' }}>
+              {k}: {String(v)}
+            </Text>
+          ))}
+      </View>
+    </ScrollView>
   );
-};
-
-export default ProductDetailsScreen;
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0B0B0B' },
-  center: {
-    flex: 1,
-    backgroundColor: '#0B0B0B',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  title: { color: '#FFFFFF', fontSize: 20, fontWeight: '700', marginBottom: 8 },
-  muted: { color: '#9CA3AF', fontSize: 14, textAlign: 'center', marginTop: 8 },
-
-  hero: { width: '100%', height: 300, backgroundColor: '#111827' },
-  heroPlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  heroInitial: { color: '#9CA3AF', fontSize: 28, fontWeight: '800' },
-
-  content: { padding: 16 },
-  name: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
-  price: { color: '#E5E7EB', fontSize: 18, marginTop: 6 },
-
-  metaRow: {
-    marginTop: 10,
-    paddingVertical: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#1F2937',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  metaLabel: { color: '#9CA3AF' },
-  metaValue: { color: '#FFFFFF' },
-
-  qtyWrap: { marginTop: 16 },
-  qtyLabel: { color: '#9CA3AF', marginBottom: 8 },
-  qtyRow: { flexDirection: 'row', alignItems: 'center' },
-  qtyBtn: {
-    width: 36, height: 36,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#111827',
-    borderWidth: 1, borderColor: '#1F2937',
-  },
-  pill: { borderRadius: 18 },
-  qtyBtnText: { color: '#FFFFFF', fontSize: 20, fontWeight: '800' },
-  qtyValue: { color: '#FFFFFF', fontSize: 16, marginHorizontal: 14, minWidth: 24, textAlign: 'center' },
-
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#1F2937',
-    marginTop: 16,
-  },
-  summaryLabel: { color: '#9CA3AF', fontSize: 14 },
-  summaryValue: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
-
-  footer: {
-    position: 'absolute',
-    left: 0, right: 0, bottom: 0,
-    backgroundColor: '#0B0B0B',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#1F2937',
-    padding: 12,
-    flexDirection: 'row',
-    gap: 12,
-  },
-  button: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primary: { backgroundColor: '#E11D48' }, // Rivals red
-  secondary: { backgroundColor: '#111827', borderWidth: 1, borderColor: '#1F2937' },
-  buttonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
-});
+}

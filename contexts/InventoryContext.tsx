@@ -22,6 +22,8 @@ export type InventoryItem = {
   [key: string]: any;
 };
 
+type PurchaseLine = { id: string; quantity?: number; [key: string]: any };
+
 type InventoryContextValue = {
   items: InventoryItem[];
   isLoading: boolean;
@@ -30,6 +32,13 @@ type InventoryContextValue = {
   refresh: () => Promise<void>;
   /** Replace items locally (e.g., after CSV import) without hitting the server. */
   setItemsLocal: (items: InventoryItem[]) => void;
+  /** Add or update a single inventory item locally. */
+  addItem: (item: InventoryItem) => void;
+  /**
+   * Fulfill a purchase by decrementing inventory quantities for the given lines.
+   * Any item not found is ignored. Quantities never go below 0.
+   */
+  fulfillPurchase: (lines: PurchaseLine[]) => Promise<void>;
 };
 
 const InventoryContext = createContext<InventoryContextValue | null>(null);
@@ -111,8 +120,45 @@ export function InventoryProvider({ children }: { children: ReactNode }) {
     setIsHydrated(true);
   };
 
+  const addItem = (item: InventoryItem) => {
+    const normalized = normalizeRow(item);
+    setItems((prev) => {
+      const idx = prev.findIndex((p) => p.id === normalized.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...normalized };
+        return next;
+      }
+      return [...prev, normalized];
+    });
+    setIsHydrated(true);
+  };
+
+  const fulfillPurchase = async (lines: PurchaseLine[]) => {
+    if (!Array.isArray(lines) || lines.length === 0) return;
+    setItems((prev) =>
+      prev.map((it) => {
+        const line = lines.find((l) => String(l.id) === String(it.id));
+        if (!line) return it;
+        const dec = Number(line.quantity ?? 1);
+        const nextQty = Math.max(0, Number(it.quantity ?? 0) - (Number.isFinite(dec) ? dec : 0));
+        return { ...it, quantity: nextQty };
+      })
+    );
+    setIsHydrated(true);
+  };
+
   const value = useMemo(
-    () => ({ items, isLoading, isHydrated, error, refresh, setItemsLocal }),
+    () => ({
+      items,
+      isLoading,
+      isHydrated,
+      error,
+      refresh,
+      setItemsLocal,
+      addItem,
+      fulfillPurchase,
+    }),
     [items, isLoading, isHydrated, error]
   );
 
