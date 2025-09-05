@@ -9,6 +9,7 @@ import SalesStatsScreen from '../screens/SalesStatsScreen';
 import ProductDetailsScreen from '../screens/ProductDetailsScreen';
 import CheckoutScreen from '../screens/CheckoutScreen';
 import OrderConfirmationScreen from '../screens/OrderConfirmationScreen';
+import CsvImportScreen from '../screens/CsvImportScreen'; // NEW
 
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { CartProvider } from '../contexts/CartContext';
@@ -25,7 +26,6 @@ function useIsSeller() {
 }
 
 export default function AppNavigator() {
-  const isSeller = useIsSeller();
   return (
     <NavigationContainer
       theme={{ ...DefaultTheme, colors: { ...DefaultTheme.colors, background: '#0b0b0b' } }}
@@ -64,28 +64,29 @@ export default function AppNavigator() {
                 options={{ title: 'Thank you!' }}
               />
 
-              {/* Gates use render-prop form so navigation/route are forwarded */}
-              <Stack.Screen
-                name="SellerDashboard"
-                options={{ title: 'Seller Dashboard' }}
-              >
-                {(props) =>
-                  isSeller ? (
-                    <SellerDashboardScreen {...(props as any)} />
-                  ) : (
-                    <NotAuthorizedScreen {...(props as any)} />
-                  )
-                }
+              {/* Seller-only routes — render-prop to forward nav/route and check after AuthProvider */}
+              <Stack.Screen name="SellerDashboard" options={{ title: 'Seller Dashboard' }}>
+                {(props) => (useIsSeller() ? (
+                  <SellerDashboardScreen {...(props as any)} />
+                ) : (
+                  <NotAuthorizedScreen {...(props as any)} />
+                ))}
               </Stack.Screen>
 
               <Stack.Screen name="SalesStats" options={{ title: 'Sales Stats' }}>
-                {(props) =>
-                  isSeller ? (
-                    <SalesStatsScreen {...(props as any)} />
-                  ) : (
-                    <NotAuthorizedScreen {...(props as any)} />
-                  )
-                }
+                {(props) => (useIsSeller() ? (
+                  <SalesStatsScreen {...(props as any)} />
+                ) : (
+                  <NotAuthorizedScreen {...(props as any)} />
+                ))}
+              </Stack.Screen>
+
+              <Stack.Screen name="CsvImport" options={{ title: 'CSV Import' }}>
+                {(props) => (useIsSeller() ? (
+                  <CsvImportScreen {...(props as any)} />
+                ) : (
+                  <NotAuthorizedScreen {...(props as any)} />
+                ))}
               </Stack.Screen>
             </Stack.Navigator>
           </InventoryProvider>

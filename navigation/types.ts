@@ -9,6 +9,7 @@ export type RootStackParamList = {
   // Seller/admin
   SellerDashboard: undefined;
   SalesStats: undefined;
+  CsvImport: undefined; // <— NEW: admin import screen
 
   // Legacy / referenced elsewhere (to satisfy TS in existing screens)
   AddCard: undefined;
@@ -19,9 +20,9 @@ export type RootStackParamList = {
   Signup: undefined;
   Login: undefined;
 
-  // Collection feature (referenced by CollectionScreen)
+  // Collection feature
   Collection: undefined;
 
-  // Edit product (referenced by EditProductScreen)
+  // Edit product
   EditProduct: { productId?: string } | undefined;
 };

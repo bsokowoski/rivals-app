@@ -3,63 +3,41 @@ import {
   View,
   Text,
   Image,
-  Pressable,
-  Alert,
-  ActivityIndicator,
   ScrollView,
+  Pressable,
+  ActivityIndicator,
 } from 'react-native';
-import { useRoute, type RouteProp } from '@react-navigation/native';
+import { useRoute, useNavigation, type RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useInventory, type InventoryItem } from '../contexts/InventoryContext';
-import { getCollection, upsertItem } from '../services/collection';
+import { useCart } from '../contexts/CartContext';
+import { useAuth } from '../contexts/AuthContext';
 
-type ProductDetailsRoute = RouteProp<RootStackParamList, 'ProductDetails'>;
+type RouteT = RouteProp<RootStackParamList, 'ProductDetails'>;
+type NavT = NativeStackNavigationProp<RootStackParamList>;
+
+function formatMoney(n?: number): string {
+  return typeof n === 'number' ? `$${n.toFixed(2)}` : '—';
+}
 
 export default function ProductDetailsScreen() {
-  const route = useRoute<ProductDetailsRoute>();
-  const paramId = route.params?.id;
+  const route = useRoute<RouteT>();
+  const navigation = useNavigation<NavT>();
+  const { user } = useAuth();
+  const isSeller =
+    Boolean(user?.isSeller) || String(user?.role ?? '').toLowerCase() === 'seller';
 
-  const { items, isHydrated, isLoading } = useInventory();
-  const [qty, setQty] = useState<number>(1);
-  const [saving, setSaving] = useState(false);
+  const { items, isLoading, isHydrated } = useInventory();
+  const { addItem } = useCart();
 
-  // If caller passed a whole item (optional), prefer that; else find by id
-  const paramItem = (route.params as any)?.item as InventoryItem | undefined;
+  const product: InventoryItem | undefined = useMemo(() => {
+    const id = route.params?.id;
+    if (!id) return undefined;
+    return items.find((i) => String(i.id) === String(id));
+  }, [items, route.params]);
 
-  const item: InventoryItem | undefined = useMemo(() => {
-    if (paramItem) return paramItem;
-    if (!paramId) return undefined;
-    return items.find((i) => i.id === String(paramId));
-  }, [items, paramItem, paramId]);
-
-  const inc = () => setQty((n) => Math.min(999, n + 1));
-  const dec = () => setQty((n) => Math.max(1, n - 1));
-
-  const addToCollection = async () => {
-    if (!item) return;
-    try {
-      setSaving(true);
-      const current = await getCollection();
-      const existing = current.find((i) => i.id === item.id);
-      const existingQty = Number(existing?.quantity ?? 0);
-      const nextQty = existingQty + qty;
-
-      // Persist merged quantity
-      await upsertItem({
-        ...item,
-        quantity: nextQty,
-      });
-
-      Alert.alert(
-        'Added to Collection',
-        `${item.name} • +${qty} (now ${nextQty})`
-      );
-    } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Failed to save to collection.');
-    } finally {
-      setSaving(false);
-    }
-  };
+  const [qty, setQty] = useState(1);
 
   if (isLoading && !isHydrated) {
     return (
@@ -69,105 +47,218 @@ export default function ProductDetailsScreen() {
     );
   }
 
-  if (!item) {
+  if (!product) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#0b0b0b', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <Text style={{ color: 'white', fontSize: 18, fontWeight: '700', textAlign: 'center' }}>
-          Item not found
+      <View style={{ flex: 1, backgroundColor: '#0b0b0b', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+        <Text style={{ color: 'white', fontSize: 18, fontWeight: '700', marginBottom: 8 }}>
+          Product not found
         </Text>
-        <Text style={{ color: '#9ca3af', marginTop: 8, textAlign: 'center' }}>
-          Try opening this page from Inventory again.
+        <Text style={{ color: '#9ca3af', textAlign: 'center' }}>
+          We couldn’t find that product. It may have been removed or the link is invalid.
         </Text>
       </View>
     );
   }
 
+  const displayPrice =
+    typeof product.forSalePrice === 'number'
+      ? product.forSalePrice
+      : typeof product.price === 'number'
+      ? product.price
+      : typeof product.marketPrice === 'number'
+      ? product.marketPrice
+      : undefined;
+
+  const onAddToCart = () => {
+    addItem(
+      {
+        ...product,
+        quantity: Math.max(1, Number(qty || 1)),
+      },
+      Math.max(1, Number(qty || 1))
+    );
+  };
+
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#0b0b0b' }} contentContainerStyle={{ padding: 16, gap: 16 }}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: '#0b0b0b' }}
+      contentContainerStyle={{ padding: 16, gap: 16 }}
+    >
       {/* Image */}
-      {item.imageUrl ? (
+      {product.imageUrl ? (
         <Image
-          source={{ uri: String(item.imageUrl) }}
-          resizeMode="contain"
-          style={{ width: '100%', height: 260, backgroundColor: '#111827', borderRadius: 12 }}
+          source={{ uri: String(product.imageUrl) }}
+          resizeMode="cover"
+          style={{
+            width: '100%',
+            height: 240,
+            borderRadius: 12,
+            backgroundColor: '#111827',
+          }}
         />
       ) : (
-        <View style={{ width: '100%', height: 180, backgroundColor: '#111827', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}>
+        <View
+          style={{
+            width: '100%',
+            height: 180,
+            borderRadius: 12,
+            backgroundColor: '#111827',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <Text style={{ color: '#6b7280' }}>No image</Text>
         </View>
       )}
 
-      {/* Title + meta */}
+      {/* Title / meta */}
       <View style={{ gap: 6 }}>
-        <Text style={{ color: 'white', fontSize: 22, fontWeight: '800' }}>{item.name}</Text>
-        <Text style={{ color: '#9ca3af' }}>
-          {item.set ?? '—'} {item.number ? `#${item.number}` : ''}
-          {item.rarity ? ` • ${item.rarity}` : ''}
-          {item.condition ? ` • ${item.condition}` : ''}
+        <Text style={{ color: 'white', fontSize: 22, fontWeight: '800' }} numberOfLines={2}>
+          {product.name}
         </Text>
         <Text style={{ color: '#9ca3af' }}>
-          SKU: {item.sku}
+          {product.set ?? '—'} {product.number ? `#${product.number}` : ''}
         </Text>
+
         <Text style={{ color: 'white', fontSize: 18, fontWeight: '700', marginTop: 6 }}>
-          {typeof item.price === 'number' ? `$${item.price.toFixed(2)}` : '—'}
+          {formatMoney(displayPrice)}
         </Text>
+
+        <Text style={{ color: '#9ca3af', marginTop: 2 }}>
+          {product.rarity ? `Rarity: ${product.rarity}` : ''}
+          {product.rarity && product.condition ? ' • ' : ''}
+          {product.condition ? `Condition: ${product.condition}` : ''}
+        </Text>
+
+        <Text style={{ color: '#9ca3af' }}>
+          In stock: {Number(product.quantity ?? 0)}
+        </Text>
+
+        {(typeof product.marketPrice === 'number' || typeof product.costPrice === 'number') && (
+          <Text style={{ color: '#6b7280', marginTop: 2 }}>
+            {typeof product.marketPrice === 'number'
+              ? `Market: ${formatMoney(product.marketPrice)}`
+              : ''}
+            {typeof product.marketPrice === 'number' && typeof product.costPrice === 'number' ? ' • ' : ''}
+            {typeof product.costPrice === 'number' ? `Cost: ${formatMoney(product.costPrice)}` : ''}
+          </Text>
+        )}
+
+        <Text style={{ color: '#6b7280', marginTop: 2 }}>SKU: {product.sku}</Text>
       </View>
 
-      {/* Quantity selector */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <Pressable
-          onPress={dec}
-          style={{ backgroundColor: '#1f2937', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 }}
-        >
-          <Text style={{ color: 'white', fontWeight: '800' }}>−</Text>
-        </Pressable>
-        <Text style={{ color: 'white', fontWeight: '800', minWidth: 24, textAlign: 'center' }}>{qty}</Text>
-        <Pressable
-          onPress={inc}
-          style={{ backgroundColor: '#1f2937', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10 }}
-        >
-          <Text style={{ color: 'white', fontWeight: '800' }}>＋</Text>
-        </Pressable>
-      </View>
-
-      {/* Actions */}
-      <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
-        <Pressable
-          onPress={addToCollection}
-          disabled={saving}
+      {/* Quantity + actions */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View
           style={{
-            backgroundColor: saving ? '#6b7280' : '#10b981',
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: '#111827',
+            borderRadius: 12,
+            overflow: 'hidden',
+          }}
+        >
+          <Pressable
+            onPress={() => setQty((q) => Math.max(1, q - 1))}
+            style={{ paddingHorizontal: 14, paddingVertical: 10 }}
+          >
+            <Text style={{ color: 'white', fontWeight: '800' }}>−</Text>
+          </Pressable>
+          <Text style={{ color: 'white', fontWeight: '700', paddingHorizontal: 10 }}>
+            {qty}
+          </Text>
+          <Pressable
+            onPress={() => setQty((q) => Math.max(1, q + 1))}
+            style={{ paddingHorizontal: 14, paddingVertical: 10 }}
+          >
+            <Text style={{ color: 'white', fontWeight: '800' }}>+</Text>
+          </Pressable>
+        </View>
+
+        <Pressable
+          onPress={onAddToCart}
+          style={{
+            backgroundColor: '#0ea5e9',
             paddingHorizontal: 16,
             paddingVertical: 12,
             borderRadius: 12,
+            alignItems: 'center',
           }}
-        >
-          <Text style={{ color: 'white', fontWeight: '800' }}>
-            {saving ? 'Saving…' : 'Add to Collection'}
-          </Text>
-        </Pressable>
-
-        {/* Placeholder for future: Add to Cart (can wire CartContext later)
-        <Pressable
-          onPress={addToCart}
-          style={{ backgroundColor: '#0ea5e9', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12 }}
         >
           <Text style={{ color: 'white', fontWeight: '800' }}>Add to Cart</Text>
         </Pressable>
-        */}
+
+        {isSeller && (
+          <Pressable
+            onPress={() => navigation.navigate('EditProduct', { productId: product.id })}
+            style={{
+              backgroundColor: '#374151',
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+              borderRadius: 12,
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{ color: 'white', fontWeight: '800' }}>Edit</Text>
+          </Pressable>
+        )}
       </View>
 
-      {/* Description dump (optional custom fields) */}
-      <View style={{ marginTop: 8, gap: 4 }}>
-        {Object.entries(item)
-          .filter(([k]) => !['id', 'sku', 'name', 'set', 'number', 'rarity', 'condition', 'price', 'quantity', 'imageUrl'].includes(k))
-          .slice(0, 6)
-          .map(([k, v]) => (
-            <Text key={k} style={{ color: '#9ca3af' }}>
-              {k}: {String(v)}
-            </Text>
-          ))}
-      </View>
+      {/* Extra info (if CSV carried extra fields) */}
+      {Object.entries(product).some(
+        ([k]) =>
+          ![
+            'id',
+            'sku',
+            'name',
+            'set',
+            'number',
+            'rarity',
+            'condition',
+            'imageUrl',
+            'quantity',
+            'price',
+            'forSalePrice',
+            'marketPrice',
+            'costPrice',
+          ].includes(k)
+      ) && (
+        <View style={{ backgroundColor: '#111827', padding: 12, borderRadius: 12, marginTop: 4 }}>
+          <Text style={{ color: 'white', fontWeight: '700', marginBottom: 6 }}>
+            Additional Details
+          </Text>
+          {Object.entries(product).map(([key, val]) => {
+            if (
+              [
+                'id',
+                'sku',
+                'name',
+                'set',
+                'number',
+                'rarity',
+                'condition',
+                'imageUrl',
+                'quantity',
+                'price',
+                'forSalePrice',
+                'marketPrice',
+                'costPrice',
+              ].includes(key)
+            ) {
+              return null;
+            }
+            const display =
+              typeof val === 'object' ? JSON.stringify(val) : String(val ?? '');
+            if (!display || display === 'undefined' || display === 'null') return null;
+            return (
+              <View key={key} style={{ flexDirection: 'row', marginBottom: 4 }}>
+                <Text style={{ color: '#9ca3af', width: 120 }}>{key}</Text>
+                <Text style={{ color: '#e5e7eb', flex: 1 }}>{display}</Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
     </ScrollView>
   );
 }

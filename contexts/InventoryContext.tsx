@@ -16,7 +16,15 @@ export type InventoryItem = {
   number?: string | number;
   rarity?: string;
   condition?: string;
-  price?: number;
+
+  /** The active for-sale price shown in the app (editable). */
+  forSalePrice?: number;
+
+  /** Optional other prices you might carry over from CSV (not required). */
+  price?: number;        // kept for backward-compat; we mirror forSalePrice here
+  marketPrice?: number;  // e.g., TCG market price
+  costPrice?: number;    // your cost
+
   quantity?: number;
   imageUrl?: string;
   [key: string]: any;
@@ -30,22 +38,32 @@ type InventoryContextValue = {
   isHydrated: boolean;
   error: string | null;
   refresh: () => Promise<void>;
-  /** Replace items locally (e.g., after CSV import) without hitting the server. */
   setItemsLocal: (items: InventoryItem[]) => void;
-  /** Add or update a single inventory item locally. */
   addItem: (item: InventoryItem) => void;
-  /**
-   * Fulfill a purchase by decrementing inventory quantities for the given lines.
-   * Any item not found is ignored. Quantities never go below 0.
-   */
   fulfillPurchase: (lines: PurchaseLine[]) => Promise<void>;
 };
 
 const InventoryContext = createContext<InventoryContextValue | null>(null);
 
-function coerceNumber(n: any, fallback = 0): number {
-  const v = Number(String(n ?? '').replace(/[^0-9.\-]/g, ''));
+function coerceNumber(n: any, fallback?: number): number | undefined {
+  if (n === null || n === undefined || n === '') return fallback;
+  const v = Number(String(n).replace(/[^0-9.\-]/g, ''));
   return Number.isFinite(v) ? v : fallback;
+}
+
+function pickImageUrl(r: any): string | undefined {
+  return (
+    r.imageUrl ??
+    r.image_url ??
+    r.image ??
+    r.imgUrl ??
+    r.img_url ??
+    r.img ??
+    r['Image URL'] ??
+    r['Image'] ??
+    r['imageLink'] ??
+    undefined
+  );
 }
 
 function normalizeRow(r: any): InventoryItem {
@@ -57,31 +75,48 @@ function normalizeRow(r: any): InventoryItem {
     [set, number, name].filter(Boolean).join('|') ||
     String(r.sku || r.id || Math.random());
 
-  const price =
-    r.price !== undefined && r.price !== null
-      ? coerceNumber(r.price, NaN)
-      : undefined;
+  // Price candidates from CSV
+  const saleCandidate =
+    coerceNumber(
+      r.forSalePrice ?? r.sale_price ?? r.salePrice ?? r.listPrice ?? r.list_price ?? r.price,
+      undefined
+    );
+  const marketCandidate = coerceNumber(
+    r.market ?? r.marketPrice ?? r.tcg_market ?? r.tcgMarket ?? r.tcgplayerMarketPrice ?? r.tcg_low ?? r.lowPrice,
+    undefined
+  );
+  const costCandidate = coerceNumber(
+    r.cost ?? r.costPrice ?? r.wholesale ?? r.buy_price ?? r.purchasePrice,
+    undefined
+  );
 
   const quantity = coerceNumber(r.quantity, 0);
+  const imageUrl = pickImageUrl(r);
 
   const {
     id: _id,
     sku: _sku,
     name: _name,
-    quantity: _qty,
-    price: _price,
     ...rest
   } = (r || {}) as Record<string, any>;
 
+  const forSalePrice = saleCandidate;
   const out: InventoryItem = {
     ...rest,
-    ...(price !== undefined ? { price } : {}),
     id: _id ?? baseSku,
     sku: _sku ?? baseSku,
     name: _name ?? name,
     set,
     number,
+    rarity: r.rarity ?? r.Rarity ?? r.rare ?? rest.rarity,
+    condition: r.condition ?? r.Condition ?? rest.condition,
+    imageUrl,
     quantity,
+    forSalePrice,
+    marketPrice: marketCandidate,
+    costPrice: costCandidate,
+    // keep "price" field equal to forSalePrice for backward-compat UI
+    ...(forSalePrice !== undefined ? { price: forSalePrice } : {}),
   };
   return out;
 }

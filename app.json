@@ -41,8 +41,10 @@
         "projectId": "5bdec808-27b5-4b67-a649-39b997cc18ec"
       }
     },
-    "plugins": [
-      "expo-secure-store"
-    ]
+    "plugins": [],
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/5bdec808-27b5-4b67-a649-39b997cc18ec"
+    }
   }
 }

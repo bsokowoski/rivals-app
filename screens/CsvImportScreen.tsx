@@ -22,26 +22,57 @@ import { useInventory, type InventoryItem } from '../contexts/InventoryContext';
 
 type ParsedRow = Record<string, any>;
 
+/* ---------- helpers ---------- */
+
 function normalizeNumber(n: any): number | undefined {
   if (n === null || n === undefined || n === '') return undefined;
   const v = Number(String(n).replace(/[^0-9.\-]/g, ''));
   return Number.isFinite(v) ? v : undefined;
 }
 
+function pickImageUrl(r: Record<string, any>): string | undefined {
+  return (
+    r.imageUrl ??
+    r.image_url ??
+    r.image ??
+    r.imgUrl ??
+    r.img_url ??
+    r.img ??
+    r['Image URL'] ??
+    r['Image'] ??
+    r['imageLink'] ??
+    undefined
+  );
+}
+
+/** Map one CSV row into our InventoryItem shape. Preserves unknown columns. */
 function rowToItem(r: ParsedRow): InventoryItem {
   const name = r.name ?? r.cardName ?? r.title ?? 'Unknown';
   const set = r.set ?? r.Set ?? r.series ?? '';
   const number = r.number ?? r.No ?? r.num ?? '';
   const rarity = r.rarity ?? r.Rarity ?? undefined;
   const condition = r.condition ?? r.Condition ?? undefined;
-  const imageUrl = r.imageUrl ?? r.Image ?? r.image ?? undefined;
 
   const computedSku =
     [set, number, name].filter(Boolean).join('|') ||
     (r.sku ?? r.id ?? String(Math.random()));
 
-  const price = normalizeNumber(r.price);
+  // Prefer explicit for-sale price columns; fall back to plain price
+  const forSalePrice =
+    normalizeNumber(
+      r.forSalePrice ?? r.sale_price ?? r.salePrice ?? r.listPrice ?? r.list_price ?? r.price
+    ) ?? undefined;
+
+  const marketPrice = normalizeNumber(
+    r.market ?? r.marketPrice ?? r.tcg_market ?? r.tcgMarket ?? r.tcgplayerMarketPrice ?? r.tcg_low ?? r.lowPrice
+  );
+
+  const costPrice = normalizeNumber(
+    r.cost ?? r.costPrice ?? r.wholesale ?? r.buy_price ?? r.purchasePrice
+  );
+
   const quantity = normalizeNumber(r.quantity) ?? 0;
+  const imageUrl = pickImageUrl(r);
 
   const base: InventoryItem = {
     id: r.id ?? computedSku,
@@ -51,20 +82,61 @@ function rowToItem(r: ParsedRow): InventoryItem {
     number,
     rarity,
     condition,
-    price,
-    quantity,
     imageUrl,
+    quantity,
+    forSalePrice,
+    marketPrice,
+    costPrice,
+    // keep legacy "price" in sync for any UI still reading it
+    ...(forSalePrice !== undefined ? { price: forSalePrice } : {}),
   };
 
-  // preserve unknown columns
+  // Preserve any unknown columns from CSV
   for (const [k, v] of Object.entries(r)) {
     if (!(k in base)) (base as any)[k] = v;
   }
   return base;
 }
 
+/** Apply in-screen price transforms to forSalePrice (keeps legacy price mirrored). */
+function applyPriceTransforms(
+  arr: InventoryItem[],
+  multiplier: string,
+  roundTo99: boolean
+): InventoryItem[] {
+  const mult = Number(multiplier) || 1;
+  return arr.map((i) => {
+    // Start from whichever price is present (forSale > price > market > cost)
+    let p =
+      typeof i.forSalePrice === 'number'
+        ? i.forSalePrice
+        : typeof i.price === 'number'
+        ? i.price
+        : typeof i.marketPrice === 'number'
+        ? i.marketPrice
+        : typeof i.costPrice === 'number'
+        ? i.costPrice
+        : undefined;
+
+    if (typeof p === 'number') {
+      p = p * mult;
+      if (roundTo99) p = Math.max(0, Math.round(p) - 0.01);
+    }
+
+    const next: InventoryItem = { ...i };
+    if (typeof p === 'number') {
+      next.forSalePrice = p;
+      (next as any).price = p; // legacy mirror
+    }
+    return next;
+  });
+}
+
+/* ---------- screen ---------- */
+
 export default function CsvImportScreen() {
   const { refresh, setItemsLocal } = useInventory();
+
   const [rawCsv, setRawCsv] = useState<string>('');
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -73,6 +145,7 @@ export default function CsvImportScreen() {
   const [multiplier, setMultiplier] = useState<string>('1.00');
   const [roundTo99, setRoundTo99] = useState<boolean>(false);
   const [filter, setFilter] = useState('');
+  const [showBanner, setShowBanner] = useState(true);
 
   const filtered = useMemo(() => {
     if (!filter.trim()) return items;
@@ -88,22 +161,16 @@ export default function CsvImportScreen() {
     let withPrice = 0;
     let qtyTotal = 0;
     for (const i of items) {
-      if (typeof i.price === 'number' && Number.isFinite(i.price)) withPrice++;
+      const hasSale =
+        typeof i.forSalePrice === 'number' ||
+        typeof i.price === 'number' ||
+        typeof i.marketPrice === 'number' ||
+        typeof i.costPrice === 'number';
+      if (hasSale) withPrice++;
       qtyTotal += Number(i.quantity ?? 0);
     }
     return { withPrice, qtyTotal };
   }, [items]);
-
-  const applyPriceTransforms = (arr: InventoryItem[]) => {
-    const mult = Number(multiplier) || 1;
-    return arr.map((i) => {
-      let price = typeof i.price === 'number' ? i.price * mult : (i.price as any);
-      if (typeof price === 'number' && roundTo99) {
-        price = Math.max(0, Math.round(price) - 0.01);
-      }
-      return { ...i, price };
-    });
-  };
 
   const pickCsv = async () => {
     try {
@@ -139,7 +206,7 @@ export default function CsvImportScreen() {
       setRows(parsedRows);
 
       const mapped = parsedRows.map(rowToItem);
-      setItems(applyPriceTransforms(mapped));
+      setItems(applyPriceTransforms(mapped, multiplier, roundTo99));
     } catch (e: any) {
       Alert.alert('Error reading CSV', e?.message ?? 'Unknown error');
     }
@@ -154,9 +221,13 @@ export default function CsvImportScreen() {
       Alert.alert('Dry run enabled', 'Toggle off "Dry Run" to push changes.');
       return;
     }
+    const url = mode === 'replace' ? ADMIN_REPLACE_URL : ADMIN_BULK_UPSERT_URL;
+    if (!url || !ADMIN_TOKEN) {
+      Alert.alert('Missing admin configuration', 'Check ADMIN_* values in env.');
+      return;
+    }
     try {
       setLoading(true);
-      const url = mode === 'replace' ? ADMIN_REPLACE_URL : ADMIN_BULK_UPSERT_URL;
       const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -168,6 +239,7 @@ export default function CsvImportScreen() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
 
+      // reflect server changes locally
       setItemsLocal(items);
       Alert.alert('Success', mode === 'replace' ? 'Inventory replaced.' : 'Inventory upserted.');
       refresh();
@@ -184,11 +256,43 @@ export default function CsvImportScreen() {
       contentContainerStyle={{ padding: 16, gap: 16 }}
     >
       <Text style={{ color: 'white', fontSize: 22, fontWeight: '800' }}>CSV Import</Text>
+
+      {/* Admin banner — Collectr tip */}
+      {showBanner ? (
+        <View
+          style={{
+            backgroundColor: '#111827',
+            borderColor: '#334155',
+            borderWidth: 1,
+            borderRadius: 12,
+            padding: 12,
+            gap: 6,
+          }}
+        >
+          <Text style={{ color: '#e5e7eb', fontWeight: '700' }}>
+            Tip: export a CSV from Collectr Admin, then import it here.
+          </Text>
+          <Text style={{ color: '#9ca3af' }}>
+            Recognized columns include: <Text style={{ color: '#e5e7eb' }}>name, set, number,
+            rarity, condition, quantity, forSalePrice (or price), marketPrice, costPrice, imageUrl, sku</Text>.
+            Unknown columns are preserved per row.
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Pressable
+              onPress={() => setShowBanner(false)}
+              style={{ backgroundColor: '#374151', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}
+            >
+              <Text style={{ color: 'white', fontWeight: '700' }}>Got it</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
       <Text style={{ color: '#9ca3af' }}>
-        Columns supported: name, set, number, rarity, condition, price, quantity, imageUrl, sku.
-        Unknown columns will be kept.
+        You can bulk-adjust the for-sale price with the multiplier and “.99” rounding before uploading.
       </Text>
 
+      {/* Controls */}
       <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <Pressable
           onPress={pickCsv}
@@ -235,7 +339,7 @@ export default function CsvImportScreen() {
 
       <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
         <Pressable
-          onPress={() => setItems((arr) => applyPriceTransforms(arr))}
+          onPress={() => setItems((arr) => applyPriceTransforms(arr, multiplier, roundTo99))}
           style={{
             backgroundColor: '#374151',
             paddingHorizontal: 16,
@@ -271,13 +375,14 @@ export default function CsvImportScreen() {
         </Pressable>
       </View>
 
+      {/* Stats */}
       <View style={{ gap: 6 }}>
         <Text style={{ color: 'white', fontWeight: '600' }}>
-          Parsed rows: {rows.length} • Items: {items.length} • With price: {stats.withPrice} • Qty
-          total: {stats.qtyTotal}
+          Parsed rows: {rows.length} • Items: {items.length} • With price: {stats.withPrice} • Qty total: {stats.qtyTotal}
         </Text>
       </View>
 
+      {/* Filter + Preview (first 50) */}
       <TextInput
         placeholder="Filter preview..."
         placeholderTextColor="#888"
@@ -303,9 +408,15 @@ export default function CsvImportScreen() {
               {item.set ?? '—'} {item.number ? `#${item.number}` : ''}
             </Text>
             <Text style={{ color: '#9ca3af' }}>
-              Qty: {item.quantity ?? 0} • Price:{' '}
-              {typeof item.price === 'number' ? `$${item.price.toFixed(2)}` : '—'} • Cond:{' '}
-              {item.condition ?? '—'}
+              Qty: {item.quantity ?? 0} • For sale:{' '}
+              {typeof item.forSalePrice === 'number'
+                ? `$${item.forSalePrice.toFixed(2)}`
+                : typeof item.price === 'number'
+                ? `$${item.price.toFixed(2)}`
+                : typeof item.marketPrice === 'number'
+                ? `$${item.marketPrice.toFixed(2)}`
+                : '—'}{' '}
+              {typeof item.costPrice === 'number' ? `• Cost: $${item.costPrice.toFixed(2)}` : ''}
             </Text>
           </View>
         )}
